@@ -253,7 +253,6 @@ df <-  select(df,doc_id,sentence_id,token,tag,entity) %>%
   select(sent_id,token,tag,entity)
 mylist <- list()
 for(line in unique(df$sent_id)) {
-  print(line)
   a <- filter(df,sent_id == line)
   sentence <- a$token
   pos <- a$pos
@@ -261,6 +260,7 @@ for(line in unique(df$sent_id)) {
   entity <- a$entity
   newline <- list(sentence,tag)
   mylist <- append(mylist,list(newline))
+  #print(line)
 }
   return(mylist)
 }
@@ -276,28 +276,13 @@ data_set <- sentence_representation(new_parsed_text)
 
 len <- length(data_set)
 data_split <- as.integer(length(data_set)*3/4)
-
 train_data <- data_set[1:data_split]
 test_data <- data_set[data_split:len]
 saveRDS(train_data,paste0(data_dir,"train_data"))
 saveRDS(test_data,paste0(data_dir,"test_data"))
-
 ```
 -----------------------------
 
-
-```{python}
-#wget https://data.deepai.org/conll2003.zip
-from nltk.tag import pos_tag
-from sklearn_crfsuite import CRF, metrics
-from sklearn.metrics import make_scorer,confusion_matrix
-from pprint import pprint
-from sklearn.metrics import f1_score,classification_report
-from sklearn.pipeline import Pipeline
-import string
-import nltk
-nltk.download('averaged_perceptron_tagger')
-```
 
 ```{r}
 sent2features <- function(sentence_and_tag) {
@@ -359,19 +344,19 @@ get_feats <- function(dta) {
   sent_feats = c()
   feats = c()
   labels = c()
-  count = 0
+  #count = 0
   len <- length(dta)
   for(sent in dta) {
-    count <- count +1
-    if(count < len) {
+    #count <- count +1
+ #   if(count < len) {
     if(length(sent[[1]]) > 2) {
       feats <- append(feats,sent2features(sent))
       labels <- append(labels,list(sent[[2]]))
-    }
+ #   }
     }
 
 }
-  feats <- append(feats,list(feats))
+  #feats <- append(feats,list(feats))
   result <- list(feats,labels)
   return(result)
 }
@@ -380,6 +365,36 @@ get_feats <- function(dta) {
 ```
 
 
+
+```{r}
+train_path = '../Data/train_data'
+test_path = '../Data/test_data'
+train = readRDS(train_path)
+test = readRDS(test_path)
+```
+
+```{r}
+training_data <- get_feats(train)
+X_train <- training_data[[1]]
+Y_train <- training_data[[2]]
+#devfeats, devlabels = get_feats_conll(conll_dev)
+testing_data <- get_feats(test)
+X_dev  <- testing_data[[1]]
+Y_dev <- testing_data[[2]]
+```
+
+```{python}
+#wget https://data.deepai.org/conll2003.zip
+from nltk.tag import pos_tag
+from sklearn_crfsuite import CRF, metrics
+from sklearn.metrics import make_scorer,confusion_matrix
+from pprint import pprint
+from sklearn.metrics import f1_score,classification_report
+from sklearn.pipeline import Pipeline
+import string
+import nltk
+nltk.download('averaged_perceptron_tagger')
+```
 
 ```{python}
 #Train a sequence model
@@ -438,38 +453,16 @@ def get_confusion_matrix(y_true,y_pred,labels):
     print_cm(confusion_matrix(trues,preds,labels),labels)
 ```
 
-```{r}
-train_path = '../Data/train_data'
-test_path = '../Data/test_data'
-train = readRDS(train_path)
-test = readRDS(test_path)
-```
-
-```{r}
-training_data <- get_feats(train)
-X_train <- training_data[[1]]
-Y_train <- training_data[[2]]
-#devfeats, devlabels = get_feats_conll(conll_dev)
-testing_data <- get_feats(test)
-X_dev  <- testing_data[[1]]
-Y_dev <- testing_data[[2]]
-```
-
-
 ```{python}
 X_train = r.X_train
 Y_train = r.Y_train
 X_dev = r.X_dev
 Y_dev = r.Y_dev
-# crf = CRF(algorithm='lbfgs', c1=0.1, c2=0.1, max_iterations=50, all_possible_states=True)
 crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
 #Just to fit on training data
 crf.fit(X_train, Y_train)
 labels = list(crf.classes_)
-print(labels)
-    #testing:
 y_pred = crf.predict(X_dev)
-print(y_pred)
 sorted_labels = sorted(labels, key=lambda name: (name[1:], name[0]))
 print(metrics.flat_f1_score(Y_dev, y_pred,average='weighted', labels=labels))
 print(metrics.flat_classification_report(Y_dev, y_pred, labels=sorted_labels, digits=3))
@@ -492,7 +485,7 @@ Y_dev = py$Y_dev
 labels = py$labels
 y_pred = py$y_pred
 sorted_labels = py$sorted_labels
-confusion_matrix = py$confusion_matrix
+#confusion_matrix = py$confusion_matrix
 
 saveRDS(X_train,paste0(data_dir,'/','X_train.rds'))
 saveRDS(Y_train,paste0(data_dir,'/','Y_train.rds'))
@@ -500,7 +493,7 @@ saveRDS(X_dev,paste0(data_dir,'/','X_dev.rds'))
 saveRDS(Y_dev,paste0(data_dir,'/','Y_dev.rds'))
 saveRDS(y_pred,paste0(data_dir,'/','y_pred.rds'))
 saveRDS(sorted_labels,paste0(data_dir,'/','sorted_labels.rds'))
-saveRDS(confusion_matrix,paste0(data_dir,'/','confusion_matrix.rds'))
+#saveRDS(confusion_matrix,paste0(data_dir,'/','confusion_matrix.rds'))
 ```
 
 ```{r}
