@@ -221,10 +221,18 @@ new_geographies <- unique(left_join(geographies,df)) %>%
 
 new_parsed_text <- left_join(parsedtxt,new_geographies)
 
-new_parsed_text <- unique(mutate(new_parsed_text,entity = ifelse(str_detect(entity,"GPE") & ENTITY == entity,ENTITY,entity)) %>%
-  mutate(entity=ifelse(is.na(entity),"",entity)) %>%
-  select(-ENTITY))
+#new_parsed_text <- unique(mutate(new_parsed_text,entity = ifelse(str_detect(entity,"GPE") & ENTITY #== entity,ENTITY,entity)) %>%
+                            
+new_parsed_text <-                     
+  #mutate(new_parsed_text,tag= ifelse(nchar(tag<2), pos,tag),
+   #mutate(ntag=nchar(tag), 
+  mutate(new_parsed_text,
+          tag=ifelse(nchar(tag) < 2, pos, tag),
+          entity=ifelse(is.na(entity),"",entity), 
+          tagentity=ifelse(entity == "", tag, entity)) %>%
+  select(-ENTITY)
 new_geographies <- filter(new_parsed_text,str_detect(entity,"GPE"))
+
 
 saveRDS(parsedtxt,paste0(data_dir,'parsedtxt.rds'))
 saveRDS(new_geographies,paste0(data_dir,'new_geographies.rds'))
@@ -247,18 +255,20 @@ new_parsed_text <- readRDS(paste0(data_dir,'new_parsed_text.rds'))
 ```{r}
 sentence_representation <- function(df) {
 
-df <-  select(df,doc_id,sentence_id,token,tag,entity) %>%
+df <-  select(df,doc_id,sentence_id,token,tag,entity,tagentity) %>%
   mutate(sent_id = as.numeric(paste0(str_extract(doc_id,'[0-9]+'),
                                      as.character(sentence_id)))) %>%
-  select(sent_id,token,tag,entity)
+  select(sent_id,token,tag,entity,tagentity)
 mylist <- list()
+# note this code could be optimised
 for(line in unique(df$sent_id)) {
   a <- filter(df,sent_id == line)
   sentence <- a$token
   pos <- a$pos
   tag <-a$tag
   entity <- a$entity
-  newline <- list(sentence,tag)
+  tagentity <- a$tagentity
+  newline <- list(sentence,tagentity)
   mylist <- append(mylist,list(newline))
   #print(line)
 }
@@ -497,12 +507,57 @@ saveRDS(sorted_labels,paste0(data_dir,'/','sorted_labels.rds'))
 ```
 
 ```{r}
+library(dplyr)
+
 data_dir <- "../Data/"
 X_train <- readRDS(paste0(data_dir,'/','X_train.rds'))
 Y_train <- readRDS(paste0(data_dir,'/','Y_train.rds'))
 X_dev <- readRDS(paste0(data_dir,'/','X_dev.rds'))
 Y_dev <- readRDS(paste0(data_dir,'/','Y_dev.rds'))
 y_pred <- readRDS(paste0(data_dir,'/','y_pred.rds'))
-sorted_labels <- readRDS(paste0(data_dir,'/','sorted_labels.rds'))
-confusion_matrix <- readRDS(paste0(data_dir,'/','confusion_matrix.rds'))
+#sorted_labels <- readRDS(paste0(data_dir,'/','sorted_labels.rds'))
+#confusion_matrix <- readRDS(paste0(data_dir,'/','confusion_matrix.rds'))
+
+
+evaluate <- function(X_dev,Y_dev_y_pred) {
+
+full_results <- data.frame(cbind(X_dev,Y_dev,y_pred))
+full_results <- mutate(full_results,comp = as.character(y_pred)==as.character(Y_dev))
+
+predictions <- unlist(full_results$y_pred)
+test <- unlist(full_results$Y_dev)
+
+ner_results <- data.frame(cbind(test,predictions))
+ner_results <- mutate(ner_results,comp = as.character(test)==as.character(predictions))
+summ <- data.frame(table(full_results$comp),row.names = TRUE)
+total_predictions <- sum(summ$Freq)
+correct_predictions <- summ['TRUE',]
+incorrect_predictions <- summ['FALSE',]
+classification_accuracy <- correct_predictions* 100 / total_predictions
+word_list <- unlist(X_dev, recursive  = FALSE)
+word_list <- data.frame(unlist(lapply(word_list,function(z) z[1])))
+names(word_list) = c('word')
+ner_results <-cbind(word_list,ner_results)
+
+false_positives <- nrow(filter(ner_results, str_detect(predictions,"GPE"),comp == FALSE))
+
+false_negatives <- nrow(filter(ner_results, str_detect(test,"GPE"), comp == FALSE))
+
+true_positives <- nrow(filter(ner_results,str_detect(predictions, "GPE"), comp == TRUE))
+true_negatives <- nrow(filter(ner_results, !str_detect(predictions,"GPE"), comp == TRUE))
+predicted_positives <- nrow(filter(ner_results, str_detect(predictions, "GPE")))
+actual_positives <- nrow(filter(ner_results, str_detect(test, "GPE")))
+
+precision <- true_positives / predicted_positives
+recall <- true_positives / actual_positives
+
+FScore = (2 * precision * recall) / (precision + recall)
+
+results <- c(false_positives,false_negatives,true_positives,true_negatives,precision,recall,FScore)
+names(results) <- c('false_positives','false_negatives','true_positives','true_negatives','precision','recall','FScore')
+return(results)
+}
+
+results <- evaluate(X_dev,Y_dev_y_pred)
+
 ```
