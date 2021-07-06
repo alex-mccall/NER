@@ -11,8 +11,7 @@ I want to combine the power (and my knowledge of R), with the power (and machine
 Load the set of libraries as well as some basic variables, such as the pointer to where data is stored and the key to access google maps api.
 
 ```{r}
-data_dir <- "../Data/"
-key <- readRDS(paste0(data_dir,"google-key"))
+prep_r_env <- function() {
 library(tidyr)
 library(xml2)
 library(dplyr)
@@ -20,7 +19,9 @@ library(googleAuthR)
 library(ggmap)
 library(stringr)
 library(spacyr)
+library(editData)
 spacy_initialize(condaenv = 'NER')
+}
 ```
 
 The data from the archives is stored as XML files. These have to be read and put into a format that will be recognised by NER analysers.
@@ -41,7 +42,7 @@ return(df)
 
 ```
 
-groups of 4 words are analysed, to cature entities up to four words long.
+groups of 4 words in each sentence are ana lysed, to cature entities up to four words long.
 get only unique values to reduce the number of calls to google.
 
 ```{r}
@@ -94,7 +95,7 @@ geographies_b <- mutate(geographies_a,
                         result=ifelse(entity=='GPE_B' & entity1=='GPE_I' & entity2=='GPE_I' & entity3=='GPE_I',
                                       paste(token,token1,token2,token3),
                                ifelse(entity=='GPE_B' & entity1=='GPE_I' & entity2=='GPE_I', paste(token,token1,token2),ifelse(entity=='GPE_B' & entity1=='GPE_I',paste(token,token1), paste(token)))))
-           
+
 
 geographies_b <- unique(filter(geographies_b,entity == 'GPE_B',
                         str_detect(token,'GD',negate=TRUE)) %>%
@@ -108,7 +109,12 @@ For each identified name, request a location (i.e. latitude and longitude) from 
 The resulting data is also written to the file system to minimise the number of times google needs to be interrogated (there is a potential cost if interrogated too many times)
 
 ```{r message = FALSE, warning=FALSE}
-ask_google <- function(geographies,uk=TRUE){
+ask_google <- function(geographies,uk=TRUE,dataset){
+filename <- paste0(data_dir,"/",dataset,"/","asked_google.rds")
+if(file.exists(filename)) {
+  df <- readRDS(filename)
+} else {
+key <- readRDS(paste0(data_dir,"google-key"))
 register_google(key = key)
 df <- data.frame(lon = double(0), lat = double(0))
 counter=0
@@ -122,6 +128,7 @@ for(gram in geographies$result) {
   df <- rbind(df,coord)
   print(paste
         (counter,gram))
+  
 }
 
 df <- cbind(geographies,df)
@@ -129,7 +136,7 @@ if(uk){
 df <- mutate(df, inuk = lon > -6 & lon < 4 & lat > 50 & lat < 61)
 unknowns <- filter(df,is.na(inuk))
 }
-
+saveRDS(df,filename)}
 return(df)
 }
 ```
@@ -137,12 +144,13 @@ return(df)
 The data is first loaded from one of a number of datasets.  
 
 ```{r}
-filename <- 'GD45'
-text <- read_xml_data(filename)
+get_text <- function(dataset) {
+dir.create(paste0(data_dir,'/',dataset))
+new_filepath <- paste0(data_dir,'/',dataset,"/",'interesting_data.rds')
+text <- read_xml_data(dataset)
 text <- text %>% filter(value != "")
 sentences <- data.frame(sapply(text,function(z) {rbind(data.frame(sentence = character(0)),z)}))
 sentences <- paste0(sentences$value)
-
 parsedtxt <- spacy_parse(sentences,tag=TRUE) 
 geographies <- filter(parsedtxt,str_detect(entity,"GPE"))
 organisations <- filter(parsedtxt,str_detect(entity,"ORG"))
@@ -150,15 +158,14 @@ persons <- filter(parsedtxt,str_detect(entity,"PERSON"))
 noun <- filter(parsedtxt,str_detect(pos,"NOUN"))
 proper_noun <- filter(parsedtxt,str_detect(pos,"PROPN"))
 locations <- get_locations(geographies)
-saveRDS(parsedtxt,paste0(data_dir,'/','parsedtxt.rds'))
+interesting_data <- list(geographies,organisations,persons,noun,proper_noun,locations,text,parsedtxt)
+names(interesting_data) <- c('geographies','organisations','persons','noun','proper_noun','locations','text','parsedtxt')
+saveRDS(interesting_data,new_filepath)
+return(interesting_data)
+}
 ```
 
-*****DO NOT RUN UNLESS YOU HAVE TO ***
 
-```{r message = FALSE, warning=FALSE}
-google_checked <- ask_google(locations)
-saveRDS(google_checked,paste0(data_dir,'/','google_checked.rds'))
-```
 
 
 
@@ -169,21 +176,17 @@ First, get UK codes
 
 
 ```{r}
-if(!exists('google_checked')) {
-google_checked <- readRDS(paste0(data_dir,'/','google_checked.rds'))
-}
+get_google_checked_complete <- function(google_checked,parsedtxt,dataset){
+filename <- paste0(data_dir,"/",dataset,"/","google_checked_complete.rds")
+if(file.exists(filename)) {
+google_checked_complete <- readRDS(filename)
+} else {
 google_checked <- filter(google_checked, str_detect(result,"GD",negate = TRUE))
-google_checked_uk <- filter(google_checked, lon> -8 & lon<2 & lat < 61 & lat > 50) %>%
-  select(-inuk)
+google_checked_uk <- filter(google_checked, lon> -8 & lon<2 & lat < 61 & lat > 50) 
 google_checked_non_uk <- filter(google_checked, (lon<=8 | lon>=2) & (lat >= 61 | lat <= 50))
 google_na <- filter(google_checked,is.na(lon) | is.na(lat))
 google_checked_non_uk <- rbind(google_checked_non_uk,google_na)
-```
 
-```{r message = FALSE, warning=FALSE}
-if(!exists('parsedtxt')) {
-  parsedtxt <- readRDS(paste0(data_dir,'/','parsedtxt.rds'))
-}
 google_checked_non_uk <- unique(select(google_checked_non_uk,token = result))
 google_checked_non_uk <- unique(left_join(google_checked_non_uk,select(parsedtxt, -doc_id,-sentence_id,-token_id)))
 google_checked_non_uk <- spacy_parse(as.character(google_checked_non_uk),tag=TRUE) %>%
@@ -191,20 +194,29 @@ google_checked_non_uk <- spacy_parse(as.character(google_checked_non_uk),tag=TRU
 google_checked_non_uk <- unique(filter(google_checked_non_uk,str_detect(entity,"GPE")))
 test <- get_locations(google_checked_non_uk)
 
-google_checked_non_uk <- ask_google(test,uk=FALSE) %>%
+google_checked_non_uk <- ask_google(test,uk=FALSE,dataset = dataset) %>%
   filter(!is.na(lon))
 
 google_checked_complete <- rbind(google_checked_uk,google_checked_non_uk)
-saveRDS(google_checked_complete,paste0(data_dir,'/','google_checked_complete.rds'))
+
+google_checked_complete <- mutate(google_checked_complete,result = str_replace(result," \'","\'"))
+
+}
+saveRDS(google_checked_complete,filename)
+return(google_checked_complete)
+}
 ```
 
-
+Use the locations that have been checked by Google to replace annotations to the text
 
 ```{r}
-if(!exists('google_checked_complete')) {
-  google_checked_complete <- readRDS(paste0(data_dir,'/','google_checked_complete.rds'))
-}
-df <- select(google_checked_complete,result) 
+prep_new_geographies <- function(google_checked_complete,geographies,dataset) {
+filename <- paste0(data_dir,"/",dataset,"/",'new_geographies.rds.csv')
+if(file.exists(filename)) {
+  #new_geographies <- readRDS(filename)
+  new_geographies <- read.csv(filename)
+} else {
+#df <- select(google_checked_complete,result) 
 df <- filter(google_checked_complete,!str_detect(result,"(?!U\\.K\\.)(.+\\..\\.$)")) %>%
   mutate(result=str_replace(result," \\'","\\'")) %>%
   rename(token = result)
@@ -216,27 +228,33 @@ df <- separate(df,token,c("A","B","C","D"),sep = " ") %>%
   select(value,ENTITY) %>%
   rename(token = value)
 
-new_geographies <- unique(left_join(geographies,df)) %>%
+new_geographies <- unique(right_join(geographies,df)) %>%
   filter(!is.na(ENTITY)) 
+saveRDS(new_geographies,filename)
+write.csv(new_geographies,paste0(filename,'.csv'))
+return(new_geographies)
+}
+}
 
+prep_new_parsed_text <- function(new_geographies,parsedtxt,dataset) {
+filename <- paste0(data_dir,"/",dataset,"/",'new_parsed_text.rds')
+if(file.exists(filename)) {
+  new_parsed_text <- readRDS(filename)
+} else {
+  
 new_parsed_text <- left_join(parsedtxt,new_geographies)
-
-#new_parsed_text <- unique(mutate(new_parsed_text,entity = ifelse(str_detect(entity,"GPE") & ENTITY #== entity,ENTITY,entity)) %>%
-                            
-new_parsed_text <-                     
-  #mutate(new_parsed_text,tag= ifelse(nchar(tag<2), pos,tag),
-   #mutate(ntag=nchar(tag), 
+new_parsed_text <- 
   mutate(new_parsed_text,
           tag=ifelse(nchar(tag) < 2, pos, tag),
+          entity=ifelse(str_detect(entity,"GPE") & !entity==ENTITY,ENTITY,entity),
           entity=ifelse(is.na(entity),"",entity), 
           tagentity=ifelse(entity == "", tag, entity)) %>%
   select(-ENTITY)
-new_geographies <- filter(new_parsed_text,str_detect(entity,"GPE"))
+}
+saveRDS(new_parsed_text,filename)
+return(new_parsed_text)
+}
 
-
-saveRDS(parsedtxt,paste0(data_dir,'parsedtxt.rds'))
-saveRDS(new_geographies,paste0(data_dir,'new_geographies.rds'))
-saveRDS(new_parsed_text,paste0(data_dir,'new_parsed_text.rds'))
 ```
 
 -----------------------------
@@ -245,16 +263,11 @@ saveRDS(new_parsed_text,paste0(data_dir,'new_parsed_text.rds'))
 
 
 ```{r}
-if(!exists('new_parsed_text')) {
-new_parsed_text <- readRDS(paste0(data_dir,'new_parsed_text.rds'))
-}
-```
-
-
-
-```{r}
-sentence_representation <- function(df) {
-
+sentence_representation <- function(df,dataset) {
+filename <- paste0(data_dir,"/",dataset,"/",'sentence_representation.rds')
+if(file.exists(filename)){
+  mylist <- readRDS(filename)
+} else {
 df <-  select(df,doc_id,sentence_id,token,tag,entity,tagentity) %>%
   mutate(sent_id = as.numeric(paste0(str_extract(doc_id,'[0-9]+'),
                                      as.character(sentence_id)))) %>%
@@ -263,34 +276,43 @@ mylist <- list()
 # note this code could be optimised
 for(line in unique(df$sent_id)) {
   a <- filter(df,sent_id == line)
+  if(nrow(a) > 2) {
   sentence <- a$token
-  pos <- a$pos
-  tag <-a$tag
-  entity <- a$entity
+  #os <- a$pos
+  #tag <-a$tag
+  #entity <- a$entity
+  #if(length(sentence >2)) {
   tagentity <- a$tagentity
   newline <- list(sentence,tagentity)
   mylist <- append(mylist,list(newline))
+  #}
   #print(line)
+  }
 }
+}
+  saveRDS(mylist,filename)
   return(mylist)
 }
+```
 
-save_data <- function(data_set) {
-  len <- length(save_data)
-  train <- data_set[1:len*3/4]
-  test <- data_set[len*3/4:len]
-  
-}
 
-data_set <- sentence_representation(new_parsed_text)
-
+```{r}
+split_data <- function(data_set,dataset) {
+filename_train <- paste0(data_dir,"/",dataset,"/",'train_data.rds')
+filename_test <- paste0(data_dir,"/",dataset,"/",'test_data.rds')
 len <- length(data_set)
 data_split <- as.integer(length(data_set)*3/4)
 train_data <- data_set[1:data_split]
 test_data <- data_set[data_split:len]
-saveRDS(train_data,paste0(data_dir,"train_data"))
-saveRDS(test_data,paste0(data_dir,"test_data"))
+traintest <- c(train_data,test_data)
+names(traintest) <- c("train","test")
+saveRDS(train_data,paste0(data_dir,filename_train))
+saveRDS(test_data,paste0(data_dir,filename_test))
+return()
+}
 ```
+
+
 -----------------------------
 
 
@@ -354,15 +376,14 @@ get_feats <- function(dta) {
   sent_feats = c()
   feats = c()
   labels = c()
-  #count = 0
   len <- length(dta)
   for(sent in dta) {
-    #count <- count +1
- #   if(count < len) {
     if(length(sent[[1]]) > 2) {
       feats <- append(feats,sent2features(sent))
       labels <- append(labels,list(sent[[2]]))
- #   }
+    } else {
+     feats <- append(feats,NA)
+      labels <- append(labels,NA)
     }
 
 }
@@ -376,168 +397,36 @@ get_feats <- function(dta) {
 
 
 
-```{r}
-train_path = '../Data/train_data'
-test_path = '../Data/test_data'
-train = readRDS(train_path)
-test = readRDS(test_path)
-```
 
 ```{r}
-training_data <- get_feats(train)
-X_train <- training_data[[1]]
-Y_train <- training_data[[2]]
-#devfeats, devlabels = get_feats_conll(conll_dev)
-testing_data <- get_feats(test)
-X_dev  <- testing_data[[1]]
-Y_dev <- testing_data[[2]]
-```
-
-```{python}
-#wget https://data.deepai.org/conll2003.zip
-from nltk.tag import pos_tag
-from sklearn_crfsuite import CRF, metrics
-from sklearn.metrics import make_scorer,confusion_matrix
-from pprint import pprint
-from sklearn.metrics import f1_score,classification_report
-from sklearn.pipeline import Pipeline
-import string
-import nltk
-nltk.download('averaged_perceptron_tagger')
-```
-
-```{python}
-#Train a sequence model
-def train_seq(X_train,Y_train,X_dev,Y_dev):
-  crf = CRF(algorithm='lbfgs', c1=0.1, c2=0.1, max_iterations=50)
-  crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
-  #, all_possible_states=True)
-    #Just to fit on training data
-  print("HELLO")
-  #print(crf)
-  crf.fit(X_train, Y_train)
-  labels = list(crf.classes_)
-  print(labels)
-  print("WORLD")
-    #testing:
-  y_pred = crf.predict(X_dev)
-  print(y_pred)
-  sorted_labels = sorted(labels, key=lambda name: (name[1:], name[0]))
-  print(metrics.flat_f1_score(Y_dev, y_pred,average='weighted', labels=labels))
-  print(metrics.flat_classification_report(Y_dev, y_pred, labels=sorted_labels, digits=3))
-    #print(metrics.sequence_accuracy_score(Y_dev, y_pred))
-  get_confusion_matrix(Y_dev, y_pred,labels=sorted_labels)
-```
-
-
-```{python}
-def print_cm(cm, labels):
-    print("\n")
-    """pretty print for confusion matrixes"""
-    columnwidth = max([len(x) for x in labels] + [5])  # 5 is value length
-    empty_cell = " " * columnwidth
-    # Print header
-    print("    " + empty_cell, end=" ")
-    for label in labels:
-        print("%{0}s".format(columnwidth) % label, end=" ")
-    print()
-    # Print rows
-    for i, label1 in enumerate(labels):
-        print("    %{0}s".format(columnwidth) % label1, end=" ")
-        sum = 0
-        for j in range(len(labels)):
-            cell = "%{0}.0f".format(columnwidth) % cm[i, j]
-            sum =  sum + int(cell)
-            print(cell, end=" ")
-        print(sum) #Prints the total number of instances per cat at the end.
-```
-
-```{python}
-#python-crfsuite does not have a confusion matrix function, 
-#so writing it using sklearn's confusion matrix and print_cm from github
-def get_confusion_matrix(y_true,y_pred,labels):
-    trues,preds = [], []
-    for yseq_true, yseq_pred in zip(y_true, y_pred):
-        trues.extend(yseq_true)
-        preds.extend(yseq_pred)
-    print_cm(confusion_matrix(trues,preds,labels),labels)
-```
-
-```{python}
-X_train = r.X_train
-Y_train = r.Y_train
-X_dev = r.X_dev
-Y_dev = r.Y_dev
-crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
-#Just to fit on training data
-crf.fit(X_train, Y_train)
-labels = list(crf.classes_)
-y_pred = crf.predict(X_dev)
-sorted_labels = sorted(labels, key=lambda name: (name[1:], name[0]))
-print(metrics.flat_f1_score(Y_dev, y_pred,average='weighted', labels=labels))
-print(metrics.flat_classification_report(Y_dev, y_pred, labels=sorted_labels, digits=3))
-    #print(metrics.sequence_accuracy_score(Y_dev, y_pred))
-confusion_matrix = get_confusion_matrix(Y_dev, y_pred,labels=sorted_labels)
-```
-
-
-```{r}
-library(reticulate)
-reticulate::conda_list()
-use_condaenv("NER", required = TRUE)
-py_config()
-
-X_train = py$X_train
-Y_train = py$Y_train
-X_dev = py$X_dev
-Y_dev = py$Y_dev
-#crf = py$crf
-labels = py$labels
-y_pred = py$y_pred
-sorted_labels = py$sorted_labels
-#confusion_matrix = py$confusion_matrix
-
-saveRDS(X_train,paste0(data_dir,'/','X_train.rds'))
-saveRDS(Y_train,paste0(data_dir,'/','Y_train.rds'))
-saveRDS(X_dev,paste0(data_dir,'/','X_dev.rds'))
-saveRDS(Y_dev,paste0(data_dir,'/','Y_dev.rds'))
-saveRDS(y_pred,paste0(data_dir,'/','y_pred.rds'))
-saveRDS(sorted_labels,paste0(data_dir,'/','sorted_labels.rds'))
-#saveRDS(confusion_matrix,paste0(data_dir,'/','confusion_matrix.rds'))
-```
-
-```{r}
-library(dplyr)
-
-data_dir <- "../Data/"
-X_train <- readRDS(paste0(data_dir,'/','X_train.rds'))
-Y_train <- readRDS(paste0(data_dir,'/','Y_train.rds'))
-X_dev <- readRDS(paste0(data_dir,'/','X_dev.rds'))
-Y_dev <- readRDS(paste0(data_dir,'/','Y_dev.rds'))
-y_pred <- readRDS(paste0(data_dir,'/','y_pred.rds'))
-#sorted_labels <- readRDS(paste0(data_dir,'/','sorted_labels.rds'))
-#confusion_matrix <- readRDS(paste0(data_dir,'/','confusion_matrix.rds'))
-
-
-evaluate <- function(X_dev,Y_dev_y_pred) {
-
+get_full_results <- function(X_dev,Y_dev,y_pred) {
 full_results <- data.frame(cbind(X_dev,Y_dev,y_pred))
 full_results <- mutate(full_results,comp = as.character(y_pred)==as.character(Y_dev))
+return(full_results)
+}
+
+get_ner_results <- function(full_results,predictions,test) {
+predictions <- unlist(full_results$y_pred)
+test <- unlist(full_results$Y_dev)
+ner_results <- data.frame(cbind(test,predictions))
+ner_results <- mutate(ner_results,comp = as.character(test)==as.character(predictions))
+word_list <- unlist(full_results$X_dev, recursive  = FALSE)
+word_list <- data.frame(unlist(lapply(word_list,function(z) z[1])))
+names(word_list) = c('word')
+ner_results <-cbind(word_list,ner_results)
+}
+
+evaluate <- function(full_results) {
 
 predictions <- unlist(full_results$y_pred)
 test <- unlist(full_results$Y_dev)
-
-ner_results <- data.frame(cbind(test,predictions))
-ner_results <- mutate(ner_results,comp = as.character(test)==as.character(predictions))
+ner_results <- get_ner_results(full_results,predictions, test)
 summ <- data.frame(table(full_results$comp),row.names = TRUE)
 total_predictions <- sum(summ$Freq)
 correct_predictions <- summ['TRUE',]
 incorrect_predictions <- summ['FALSE',]
 classification_accuracy <- correct_predictions* 100 / total_predictions
-word_list <- unlist(X_dev, recursive  = FALSE)
-word_list <- data.frame(unlist(lapply(word_list,function(z) z[1])))
-names(word_list) = c('word')
-ner_results <-cbind(word_list,ner_results)
+
 
 false_positives <- nrow(filter(ner_results, str_detect(predictions,"GPE"),comp == FALSE))
 
@@ -550,14 +439,171 @@ actual_positives <- nrow(filter(ner_results, str_detect(test, "GPE")))
 
 precision <- true_positives / predicted_positives
 recall <- true_positives / actual_positives
-
 FScore = (2 * precision * recall) / (precision + recall)
-
 results <- c(false_positives,false_negatives,true_positives,true_negatives,precision,recall,FScore)
-names(results) <- c('false_positives','false_negatives','true_positives','true_negatives','precision','recall','FScore')
+names(results) <- c('false_positives','false_negatives','true_positives','true_negatives','p#recision','recall','FScore')
 return(results)
 }
 
-results <- evaluate(X_dev,Y_dev_y_pred)
+get_confusion_matrix <- function(false_negatives, true_positives, true_negatives, false_positives) {
+TClass <- factor(c(0, 0, 1, 1))
+PClass <- factor(c(0, 1, 0, 1))
+Y      <- c(false_negatives, true_positives, true_negatives, false_positives)
+df <- data.frame(TClass, PClass, Y)
+}
+
+draw_confusion_matrix <- function(df) {
+pic <- ggplot(data =  df, mapping = aes(x = TClass, y = PClass, label)) +
+  geom_tile(aes(fill = c(1,2,3,4)), colour = "white") +
+  geom_text(aes(label = sprintf("%1.0f", Y)), vjust = 1) +
+  scale_fill_gradient(low = "green1", high = "green4") +
+  scale_x_discrete(breaks=c("0","1"),
+        labels=c("Positive", "Negative")) +
+  scale_y_discrete(breaks=c("0","1"),
+        labels=c("Negative", "Positive")) +
+  theme_minimal() + theme(legend.position = "none") +
+  theme(axis.text.y = element_text(face="bold", color="#993333", 
+                          size=14, angle=90, hjust = 1)) +
+  theme(axis.text.x = element_text(face="bold", color="#993333", 
+                          size=14)) +
+  theme(axis.title = element_blank()) +
+  theme(axis.ticks = element_blank())
+  ggtitle("Confusion Matrix")
+  return(pic)
+}
 
 ```
+
+
+```{r}
+get_result_data <- function(dataset) {
+  X_train_filename <- paste0(data_dir,"/",dataset,"/",'X_train.rds')
+  Y_train_filename <- paste0(data_dir,"/",dataset,"/",'Y_train.rds')
+  X_dev_filename <- paste0(data_dir,"/",dataset,"/",'X_dev.rds')
+  Y_dev_filename <- paste0(data_dir,"/",dataset,"/",'Y_dev.rds')
+  Y_pred_filename <- paste0(data_dir,"/",dataset,"/",'Y_pred.rds')
+  if(file.exists(Y_pred_filename)) {
+    #X_train <- readRDS(X_train_filename)
+    #Y_train <- readRDS(Y_train_filename)
+    #X_dev <- readRDS(X_dev_filename)
+    #Y_dev <- readRDS(Y_dev_filename)
+    #y_pred <- readRDS(Y_pred_filename)
+  } else {
+    X_train <- py$X_train
+    Y_train <- py$Y_train
+    X_dev <- py$X_dev
+    Y_dev <- py$Y_dev
+    y_pred <- py$y_pred
+    saveRDS(X_train,X_train_filename)
+    saveRDS(Y_train,Y_train_filename)
+    saveRDS(X_dev,X_dev_filename)
+    saveRDS(Y_dev,Y_dev_filename)
+    saveRDS(y_pred,Y_pred_filename)
+  }
+  saved_data <- list(X_train,Y_train,X_dev,Y_dev,y_pred)
+  names(saved_data) <- c('X_train','Y_train','X_dev','Y_dev','y_pred')
+  return(saved_data)
+}
+```
+
+```{r}
+save_results <- function(results,prose,ner_results,confusion_matrix,placenames,pic,dataset) {
+saveRDS(results,paste0(data_dir,'/',dataset,"/",'results.rds'))
+saveRDS(prose,paste0(data_dir,'/',dataset,"/",'prose.rds'))
+saveRDS(ner_results,paste0(data_dir,'/',dataset,"/",'ner_results.rds'))
+saveRDS(confusion_matrix,paste0(data_dir,'/',dataset,"/",'confusion_matrix.rds'))
+saveRDS(placenames,paste0(data_dir,'/',dataset,"/",'placenames.rds'))
+saveRDS(pic,paste0(data_dir,'/',dataset,"/",'confusion_plot.rds'))
+}
+```
+
+```{python}
+#wget https://data.deepai.org/conll2003.zip
+def prep_python_env():
+  data_dir = r.data_dir
+  dataset = r.dataset
+  from nltk.tag import pos_tag
+  from sklearn.metrics import make_scorer,confusion_matrix
+  from pprint import pprint
+  from sklearn.metrics import f1_score,classification_report
+  from sklearn.pipeline import Pipeline
+  from sklearn_crfsuite import CRF, metrics
+  import string
+  import nltk
+  #nltk.download('averaged_perceptron_tagger')
+  X_train_file = data_dir + '/' + dataset + '/' + 'X_train.obj'
+  Y_train_file = data_dir + '/' + dataset +  '/' + 'Y_train.obj'
+  X_dev_file = data_dir + '/' + dataset + '/' + 'X_dev.obj'
+  Y_dev_file = data_dir + '/' + dataset + '/' + 'Y_dev.obj'
+  exists = os.path.isfile(X_train_file)
+  if exists :
+    print("loading from disk")
+    with open(X_train_file, 'rb') as X_train_f:
+      X_train = pickle.load(X_train_f)
+      time.sleep(1)
+    with open(Y_train_file, 'rb') as Y_train_f:
+      Y_train = pickle.load(Y_train_f)
+      time.sleep(1)
+    with open(Y_dev_file, 'rb') as Y_dev_f:
+      Y_dev = pickle.load(Y_dev_f)
+      time.sleep(1)
+    with open(X_dev_file, 'rb') as X_dev_f:
+      X_dev = pickle.load(X_dev_f)
+      time.sleep(3)
+  if not exists :
+    print("transferring from R")
+    X_train = r.X_train
+    Y_train = r.Y_train
+    X_dev = r.X_dev
+    Y_dev = r.Y_dev
+    with open(X_train_file, 'wb') as X_train_f:
+      pickle.dump(X_train, X_train_f)
+      time.sleep(1)
+    with open(Y_train_file, 'wb') as Y_train_f:
+      pickle.dump(Y_train, Y_train_f) 
+      time.sleep(1)
+    with open(X_dev_file, 'wb') as X_dev_f:
+      pickle.dump(X_dev, X_dev_f) 
+      time.sleep(1)
+    with open(Y_dev_file, 'wb') as Y_dev_f:
+      pickle.dump(Y_dev, Y_dev_f)
+      time.sleep(3)
+  return X_train, Y_train, X_dev, Y_dev
+```
+
+```{python}
+#Train a sequence model
+def train_seq(X_train,Y_train,X_dev,Y_dev):
+  crf = CRF(algorithm='lbfgs', c1=0.1, c2=0.1, max_iterations=50)
+  crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
+  #, all_possible_states=True)
+    #Just to fit on training data
+  #print(crf)
+  crf.fit(X_train, Y_train)
+  labels = list(crf.classes_)
+  print(labels)
+  #print("WORLD")
+    #testing:
+  y_pred = crf.predict(X_dev)
+  crfmodel = data_dir + '/' + dataset + '/' + 'crfmodel.obj'
+  with open(crfmodel, 'wb') as output:  # Overwrites any existing file.
+        pickle.dump(crf, output)
+  #print(y_pred)
+  #sorted_labels = sorted(labels, key=lambda name: (name[1:], name[0]))
+  #print(metrics.flat_f1_score(Y_dev, y_pred,average='weighted', labels=labels))
+  #print(metrics.flat_classification_report(Y_dev, y_pred, labels=sorted_labels, digits=3))
+    #print(metrics.sequence_accuracy_score(Y_dev, y_pred))
+  #get_confusion_matrix(Y_dev, y_pred,labels=sorted_labels)
+  X = X_train[1:49]
+  Y = Y_train[1:49]
+  crf.fit(X,Y)
+  
+```
+
+
+
+
+
+
+`
+

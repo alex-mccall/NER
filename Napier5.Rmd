@@ -1,0 +1,101 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r message = FALSE, warning=FALSE}
+prep_r_env()
+dataset <- 'GD45'
+data_dir <- "../Data/"
+train_path <-  paste0(data_dir,"/",dataset,"/",'train_data.rds')
+test_path <- paste0(data_dir,"/",dataset,"/",'test_data.rds')
+
+interesting_data <- get_text(dataset)
+
+google_checked <- ask_google(interesting_data[['locations']],dataset = dataset)
+google_checked_complete <- get_google_checked_complete(google_checked, 
+                                                  interesting_data[['parsedtxt']],
+                                                       dataset)
+
+new_geographies <- prep_new_geographies(google_checked_complete,
+                                        interesting_data[['geographies']],
+                                        dataset)
+```
+
+At this point, the data should be checked
+
+```{r}
+new_parsed_text <- prep_new_parsed_text(new_geographies,
+                                        interesting_data[['parsedtxt']],
+                                        dataset)
+e <- new_parsed_text[1:50,]
+data_set <- sentence_representation(e,dataset)
+data_set <- sentence_representation(new_parsed_text,dataset)
+split_data(data_set,dataset)
+
+
+train = readRDS(train_path)
+test = readRDS(test_path)
+training_data <- get_feats(train)
+X_train <- training_data[[1]]
+Y_train <- as.list(training_data[[2]])
+#devfeats, devlabels = get_feats_conll(conll_dev)
+testing_data <- get_feats(test)
+X_dev  <- testing_data[[1]]
+Y_dev <- testing_data[[2]]
+```
+
+```{python}
+import pickle
+import os.path
+from nltk.tag import pos_tag
+from sklearn.metrics import make_scorer,confusion_matrix
+from pprint import pprint
+from sklearn.metrics import f1_score,classification_report
+from sklearn.pipeline import Pipeline
+from sklearn_crfsuite import CRF, metrics
+import string
+import nltk
+nltk.download('averaged_perceptron_tagger')
+X_train,Y_train,X_dev, Y_dev = prep_python_env()
+crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
+#Just to fit on training data
+crf.fit(X_train, Y_train)
+#labels = list(crf.classes_)
+y_pred = crf.predict(X_dev)
+
+```
+
+
+```{r}
+library(reticulate)
+saved_data <- get_result_data(dataset)
+X_train <- saved_data[['X_train']]
+Y_train <- saved_data[['Y_train']]
+X_dev <- saved_data[['X_dev']]
+Y_dev <- saved_data[['Y_dev']]
+y_pred <- saved_data[['y_pred']]
+
+full_results <- get_full_results(X_dev,Y_dev,y_pred)
+
+predictions <- full_results$y_pred
+#test <- unlist(full_results$Y_dev)
+
+ner_results <-get_ner_results(full_results,predictions,test)
+results <- evaluate(full_results)
+confusion_matrix <- get_confusion_matrix(results['false_negatives'], results['true_positives'], results['true_negatives'], results['false_positives'])
+placenames <- unique(filter(ner_results,str_starts(predictions,"GPE"),
+                            comp == TRUE))
+pic <- draw_confusion_matrix(confusion_matrix)
+
+ner_results <- mutate(ner_results,highlights = ifelse(comp,ifelse(str_starts(predictions,"GPE"),paste0("++",word,"++"),word)
+                                                      ,paste0("***",word,"***")))
+
+prose <- paste(ner_results$highlights, collapse=' ', sep="")
+
+save_results(results,prose,ner_results,confusion_matrix,placenames,pic,dataset)
+
+```
+
+
