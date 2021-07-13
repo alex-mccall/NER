@@ -7,9 +7,14 @@ output: html_notebook
 ```{r message = FALSE, warning=FALSE}
 prep_r_env()
 dataset <- 'GD45'
+model <- 'AF62'
 data_dir <- "../Data/"
+
 train_path <-  paste0(data_dir,"/",dataset,"/",'train_data.rds')
-test_path <- paste0(data_dir,"/",dataset,"/",'test_data.rds')
+test_path <-  paste0(data_dir,"/",dataset,"/",'test_data.rds')
+full_test_path <-  paste0(data_dir,"/",dataset,"/",'full_test_data.rds')
+model_path <- paste0(data_dir,"/",model,"/",'crfmodel.obj')
+train_model <- !file.exists(model_path)
 
 interesting_data <- get_text(dataset)
 
@@ -29,21 +34,23 @@ At this point, the data should be checked
 new_parsed_text <- prep_new_parsed_text(new_geographies,
                                         interesting_data[['parsedtxt']],
                                         dataset)
-e <- new_parsed_text[1:50,]
-data_set <- sentence_representation(e,dataset)
 data_set <- sentence_representation(new_parsed_text,dataset)
-split_data(data_set,dataset)
 
 
-train = readRDS(train_path)
+split_data(data_set,dataset,train_model)
+
 test = readRDS(test_path)
+if(train_model) {
+train = readRDS(train_path)
 training_data <- get_feats(train)
 X_train <- training_data[[1]]
 Y_train <- as.list(training_data[[2]])
 #devfeats, devlabels = get_feats_conll(conll_dev)
+}
 testing_data <- get_feats(test)
 X_dev  <- testing_data[[1]]
 Y_dev <- testing_data[[2]]
+
 ```
 
 ```{python}
@@ -57,22 +64,28 @@ from sklearn.pipeline import Pipeline
 from sklearn_crfsuite import CRF, metrics
 import string
 import nltk
-nltk.download('averaged_perceptron_tagger')
-X_train,Y_train,X_dev, Y_dev = prep_python_env()
-crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
-#Just to fit on training data
-crf.fit(X_train, Y_train)
-#labels = list(crf.classes_)
-y_pred = crf.predict(X_dev)
 
+nltk.download('averaged_perceptron_tagger')
+X_train,Y_train,X_dev, Y_dev, train_model,model_file = prep_python_env()
+if train_model: 
+  crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
+  #Just to fit on training data
+  crf.fit(X_train, Y_train)
+  #labels = list(crf.classes_)
+else:
+  with open(model_file, 'rb') as model_f:
+      crf = pickle.load(model_f)
+
+
+y_pred = crf.predict(X_dev)
 ```
 
 
 ```{r}
 library(reticulate)
 saved_data <- get_result_data(dataset)
-X_train <- saved_data[['X_train']]
-Y_train <- saved_data[['Y_train']]
+#X_train <- saved_data[['X_train']]
+#Y_train <- saved_data[['Y_train']]
 X_dev <- saved_data[['X_dev']]
 Y_dev <- saved_data[['Y_dev']]
 y_pred <- saved_data[['y_pred']]

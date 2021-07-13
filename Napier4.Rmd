@@ -278,15 +278,9 @@ for(line in unique(df$sent_id)) {
   a <- filter(df,sent_id == line)
   if(nrow(a) > 2) {
   sentence <- a$token
-  #os <- a$pos
-  #tag <-a$tag
-  #entity <- a$entity
-  #if(length(sentence >2)) {
   tagentity <- a$tagentity
   newline <- list(sentence,tagentity)
   mylist <- append(mylist,list(newline))
-  #}
-  #print(line)
   }
 }
 }
@@ -297,16 +291,20 @@ for(line in unique(df$sent_id)) {
 
 
 ```{r}
-split_data <- function(data_set,dataset) {
+split_data <- function(data_set,dataset,train_model) {
 filename_train <- paste0(data_dir,"/",dataset,"/",'train_data.rds')
 filename_test <- paste0(data_dir,"/",dataset,"/",'test_data.rds')
 len <- length(data_set)
+if(train_model) {
 data_split <- as.integer(length(data_set)*3/4)
 train_data <- data_set[1:data_split]
 test_data <- data_set[data_split:len]
-traintest <- c(train_data,test_data)
-names(traintest) <- c("train","test")
 saveRDS(train_data,paste0(data_dir,filename_train))
+#traintest <- c(train_data,test_data)
+} else {
+test_data <- data_set
+}
+#names(traintest) <- c("train","test")
 saveRDS(test_data,paste0(data_dir,filename_test))
 return()
 }
@@ -346,21 +344,21 @@ sent2features <- function(sentence_and_tag) {
     wordfeats <- append(wordfeats,c("prevSecondTag" = sen_tags[[count-2]]))
     }
     
-    if(count == length(sentence)-1) {
-      wordfeats<- append(wordfeats,c("nextWord" = sentence[[count +1]]))
+    if(count == length(sentence)) {
+      wordfeats<- append(wordfeats,c("nextWord" =  "</S>"))
       wordfeats = append(wordfeats,c("nextNextWord" =  "</S>"))
-      wordfeats<- append(wordfeats,c("nextTag" = sen_tags[[count +1]]))
+      wordfeats<- append(wordfeats,c("nextTag" =  "</S>"))
       wordfeats = append(wordfeats,c("nextNextTag" =  "</S>"))
-    } else if(count == length(sentence)) {
-      wordfeats <- append(wordfeats,c("nextWord" = "</S>"))
+    } else if(count == length(sentence)-1) {
+      wordfeats <- append(wordfeats,c("nextWord" = sentence[[count +1]]))
       wordfeats <- append(wordfeats,c("nextNextWord" ="</S>"))
-      wordfeats <- append(wordfeats,c("nextTag" = "</S>"))
-      wordfeats <- append(wordfeats,c("nextNextTag" ="</S>"))
-    } else if(count <length(sentence <2)) {
+      wordfeats <- append(wordfeats,c("nextTag" =sen_tags[[count +1]]))
+      wordfeats <- append(wordfeats,c("nextNextTag" =  "</S>"))
+    } else if(count < length(sentence)-1) {
       wordfeats = append(wordfeats,c("nextWord" = sentence[[count+1]]))
-      wordfeats  = append(wordfeats,c("nextNextWord" = "</S>"))
+      wordfeats  = append(wordfeats,c("nextNextWord" = sentence[[count+2]]))
       wordfeats = append(wordfeats,c("nextTag" = sen_tags[[count+1]]))
-      wordfeats  = append(wordfeats,c("nextNexTag" = "</S>"))
+      wordfeats  = append(wordfeats,c("nextNexTag" = sen_tags[[count+2]]))
     }
         features <- append(features,list(wordfeats))
         feb <- list(features)
@@ -477,8 +475,8 @@ pic <- ggplot(data =  df, mapping = aes(x = TClass, y = PClass, label)) +
 
 ```{r}
 get_result_data <- function(dataset) {
-  X_train_filename <- paste0(data_dir,"/",dataset,"/",'X_train.rds')
-  Y_train_filename <- paste0(data_dir,"/",dataset,"/",'Y_train.rds')
+  #X_train_filename <- paste0(data_dir,"/",dataset,"/",'X_train.rds')
+  #Y_train_filename <- paste0(data_dir,"/",dataset,"/",'Y_train.rds')
   X_dev_filename <- paste0(data_dir,"/",dataset,"/",'X_dev.rds')
   Y_dev_filename <- paste0(data_dir,"/",dataset,"/",'Y_dev.rds')
   Y_pred_filename <- paste0(data_dir,"/",dataset,"/",'Y_pred.rds')
@@ -487,21 +485,21 @@ get_result_data <- function(dataset) {
     #Y_train <- readRDS(Y_train_filename)
     #X_dev <- readRDS(X_dev_filename)
     #Y_dev <- readRDS(Y_dev_filename)
-    #y_pred <- readRDS(Y_pred_filename)
+    y_pred <- readRDS(Y_pred_filename)
   } else {
-    X_train <- py$X_train
-    Y_train <- py$Y_train
+    #X_train <- py$X_train
+    #Y_train <- py$Y_train
     X_dev <- py$X_dev
     Y_dev <- py$Y_dev
     y_pred <- py$y_pred
-    saveRDS(X_train,X_train_filename)
-    saveRDS(Y_train,Y_train_filename)
+    #saveRDS(X_train,X_train_filename)
+    #saveRDS(Y_train,Y_train_filename)
     saveRDS(X_dev,X_dev_filename)
     saveRDS(Y_dev,Y_dev_filename)
     saveRDS(y_pred,Y_pred_filename)
   }
-  saved_data <- list(X_train,Y_train,X_dev,Y_dev,y_pred)
-  names(saved_data) <- c('X_train','Y_train','X_dev','Y_dev','y_pred')
+  saved_data <- list(X_dev,Y_dev,y_pred)
+  names(saved_data) <- c('X_dev','Y_dev','y_pred')
   return(saved_data)
 }
 ```
@@ -522,6 +520,8 @@ saveRDS(pic,paste0(data_dir,'/',dataset,"/",'confusion_plot.rds'))
 def prep_python_env():
   data_dir = r.data_dir
   dataset = r.dataset
+  model = r.model
+  train_model = r.train_model
   from nltk.tag import pos_tag
   from sklearn.metrics import make_scorer,confusion_matrix
   from pprint import pprint
@@ -535,69 +535,51 @@ def prep_python_env():
   Y_train_file = data_dir + '/' + dataset +  '/' + 'Y_train.obj'
   X_dev_file = data_dir + '/' + dataset + '/' + 'X_dev.obj'
   Y_dev_file = data_dir + '/' + dataset + '/' + 'Y_dev.obj'
-  exists = os.path.isfile(X_train_file)
-  if exists :
+  model_file = data_dir + '/' + model + '/' + 'crfmodel.obj'
+  exists = os.path.isfile(X_dev_file)
+  if exists and train_model:
     print("loading from disk")
     with open(X_train_file, 'rb') as X_train_f:
       X_train = pickle.load(X_train_f)
-      time.sleep(1)
     with open(Y_train_file, 'rb') as Y_train_f:
       Y_train = pickle.load(Y_train_f)
-      time.sleep(1)
-    with open(Y_dev_file, 'rb') as Y_dev_f:
-      Y_dev = pickle.load(Y_dev_f)
-      time.sleep(1)
     with open(X_dev_file, 'rb') as X_dev_f:
       X_dev = pickle.load(X_dev_f)
-      time.sleep(3)
-  if not exists :
-    print("transferring from R")
+    with open(Y_dev_file, 'rb') as Y_dev_f:
+      Y_dev = pickle.load(Y_dev_f)      
+  elif exists:
+    with open(X_dev_file, 'rb') as X_dev_f:
+      X_dev = pickle.load(X_dev_f)
+    with open(Y_dev_file, 'rb') as Y_dev_f:
+      Y_dev = pickle.load(Y_dev_f)
+    X_train = None
+    Y_train = None
+  else:
     X_train = r.X_train
     Y_train = r.Y_train
-    X_dev = r.X_dev
     Y_dev = r.Y_dev
-    with open(X_train_file, 'wb') as X_train_f:
-      pickle.dump(X_train, X_train_f)
-      time.sleep(1)
-    with open(Y_train_file, 'wb') as Y_train_f:
-      pickle.dump(Y_train, Y_train_f) 
-      time.sleep(1)
-    with open(X_dev_file, 'wb') as X_dev_f:
-      pickle.dump(X_dev, X_dev_f) 
-      time.sleep(1)
-    with open(Y_dev_file, 'wb') as Y_dev_f:
-      pickle.dump(Y_dev, Y_dev_f)
-      time.sleep(3)
-  return X_train, Y_train, X_dev, Y_dev
+    X_dev = r.X_dev
+  with open(X_train_file, 'wb') as X_train_f:
+    pickle.dump(X_train, X_train_f)
+  with open(Y_train_file, 'wb') as Y_train_f:
+    pickle.dump(Y_train, Y_train_f) 
+  with open(X_dev_file, 'wb') as X_dev_f:
+    pickle.dump(X_dev, X_dev_f) 
+  with open(Y_dev_file, 'wb') as Y_dev_f:
+    pickle.dump(Y_dev, Y_dev_f)
+  return X_train, Y_train, X_dev, Y_dev, train_model, model_file
 ```
 
 ```{python}
 #Train a sequence model
 def train_seq(X_train,Y_train,X_dev,Y_dev):
-  crf = CRF(algorithm='lbfgs', c1=0.1, c2=0.1, max_iterations=50)
   crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
-  #, all_possible_states=True)
-    #Just to fit on training data
-  #print(crf)
   crf.fit(X_train, Y_train)
   labels = list(crf.classes_)
-  print(labels)
-  #print("WORLD")
-    #testing:
   y_pred = crf.predict(X_dev)
   crfmodel = data_dir + '/' + dataset + '/' + 'crfmodel.obj'
   with open(crfmodel, 'wb') as output:  # Overwrites any existing file.
         pickle.dump(crf, output)
-  #print(y_pred)
-  #sorted_labels = sorted(labels, key=lambda name: (name[1:], name[0]))
-  #print(metrics.flat_f1_score(Y_dev, y_pred,average='weighted', labels=labels))
-  #print(metrics.flat_classification_report(Y_dev, y_pred, labels=sorted_labels, digits=3))
-    #print(metrics.sequence_accuracy_score(Y_dev, y_pred))
-  #get_confusion_matrix(Y_dev, y_pred,labels=sorted_labels)
-  X = X_train[1:49]
-  Y = Y_train[1:49]
-  crf.fit(X,Y)
-  
 ```
 
 
