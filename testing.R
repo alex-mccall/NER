@@ -15,21 +15,26 @@ test_data1 <- filter(test_data,data_row_odd == "Patrick")
 return(test_data1)
 }
 
-check_train <- function(X_train, Y_train) {
+check_train <- function(X_train, Y_train, y_pred) {
 c2 <- unlist(X_train, recursive = FALSE)
 c3 <- lapply(c2,function(x) x[['word']])
 c4 <- lapply(c2,function(x) x[['tag']])
 c5 <-data.frame(cbind(c3,c4))
 c6 <- unlist(Y_train, recursive = FALSE)
-c7 <- cbind(c5,c6)
-c7 <- filter(c7, str_detect(c4,'GPE'))
+c8 <- unlist(y_pred, recursive = FALSE)
+c7 <- cbind(c5,c6,c8)
+names(c7) <- c("word","tag","test","pred")
+#c7 <- filter(c7, str_detect(c4,'GPE'))
+return(c7)
 }
 
-check_t1 <- check_train(X_train, Y_train)
-check_t2 <- check_train(X_dev,Y_dev)
+#check_t1 <- check_train(X_train, Y_train, y_pred)
+check_t2 <- check_train(X_dev,Y_dev, y_pred) %>% filter(pred != "O") %>%
+  mutate(testing = identical(tag, y_pred)) %>%
+  filter(testing==FALSE)
 
 
-b <- check_data(train)
+b <- check_data(train) 
 
 z1 <- unlist(training_data[[1]], recursive = FALSE)
 z2 <- unlist(training_data[[2]], recursive = FALSE)

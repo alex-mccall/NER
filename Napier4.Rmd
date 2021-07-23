@@ -48,6 +48,7 @@ get only unique values to reduce the number of calls to google.
 ```{r}
 get_locations <- function(geographies) {
 rows <- nrow(geographies)-4
+geographies <- arrange(geographies,doc_id,sentence_id,token_id)
 #geographies_places <- data.frame(places=geographies$token[-1])
 geographies_entity <- geographies$entity[-1]
 geographies_entity <- append(geographies_entity,NA)
@@ -63,6 +64,9 @@ geographies_entity3 <- append(geographies_entity3,NA)
 geographies_entity3 <- append(geographies_entity3,NA)
 geographies_entity3 <- append(geographies_entity3,NA)
 geographies_entity3 <- append(geographies_entity3,NA)
+
+
+
 
 geographies_places <- geographies$token[-1]
 geographies_places <- append(geographies_places,NA)
@@ -89,6 +93,7 @@ geographies_a <- cbind(geographies,
                        token3=geographies_places2,
                        token4=geographies_places3)
 
+
 geographies_a <- geographies_a %>% replace(is.na(.), FALSE)  
 
 geographies_b <- mutate(geographies_a,
@@ -97,9 +102,21 @@ geographies_b <- mutate(geographies_a,
                                ifelse(entity=='GPE_B' & entity1=='GPE_I' & entity2=='GPE_I', paste(token,token1,token2),ifelse(entity=='GPE_B' & entity1=='GPE_I',paste(token,token1), paste(token)))))
 
 
-geographies_b <- unique(filter(geographies_b,entity == 'GPE_B',
-                        str_detect(token,'GD',negate=TRUE)) %>%
-  select(result))
+for(test in c(1:4)){
+geographies_res_before <- c(NA,geographies_b$result)
+geographies_res_before <-geographies_res_before[1:length(geographies_res_before)-1]
+
+geographies_b <- cbind(geographies_b,geographies_res_before)
+
+geographies_b <- mutate(geographies_b,
+                        result=ifelse(entity=='GPE_I', 
+                                      geographies_res_before,result))
+geographies_b <- select(geographies_b, -geographies_res_before)
+
+}
+geographies_b <- unique(filter(geographies_b,str_detect(entity,'GP'),
+                        str_detect(token,'GD',negate=TRUE)))
+#  select(result))
   return(geographies_b)
 }
 ```
@@ -109,34 +126,52 @@ For each identified name, request a location (i.e. latitude and longitude) from 
 The resulting data is also written to the file system to minimise the number of times google needs to be interrogated (there is a potential cost if interrogated too many times)
 
 ```{r message = FALSE, warning=FALSE}
-ask_google <- function(geographies,uk=TRUE,dataset){
+ask_google <- function(locations,dataset,uk=TRUE){
 filename <- paste0(data_dir,"/",dataset,"/","asked_google.rds")
 if(file.exists(filename)) {
   df <- readRDS(filename)
 } else {
 key <- readRDS(paste0(data_dir,"google-key"))
 register_google(key = key)
-df <- data.frame(lon = double(0), lat = double(0))
+df <- data.frame(gram = character(),lon = double(0), lat = double(0))
 counter=0
 #geographies_b <- geographies()
-for(gram in geographies$result) {
+for(gram in unique(locations$result)) {
   counter <- counter + 1
   if(uk){
-    gram <- paste0(gram,',','UK')
+    gram1 <- paste0(gram,',','UK')
+  } else {
+    gram1 = gram
   }
-  coord <- geocode(gram)
+  coord <- cbind(gram,geocode(gram1))
   df <- rbind(df,coord)
   print(paste
         (counter,gram))
-  
 }
 
-df <- cbind(geographies,df)
+
+names(df) <- c('result','lon','lat')
+
 if(uk){
-df <- mutate(df, inuk = lon > -6 & lon < 4 & lat > 50 & lat < 61)
-unknowns <- filter(df,is.na(inuk))
+  saveRDS(df,filename)
 }
-saveRDS(df,filename)}
+}
+
+df <- left_join(locations,df)
+locations <- select(locations,doc_id,sentence_id,token_id,entity,result) %>%
+  filter(entity == "GPE_B")
+
+
+if(uk){
+df <- mutate(df, inuk = lon > -6 & lon < 4 & lat > 50 & lat < 61) 
+  
+unknowns <- filter(df,is.na(inuk))
+
+}
+
+df <- select(df,doc_id,token,sentence_id,token_id,result,pos,tag,entity,lon,lat,inuk)
+
+
 return(df)
 }
 ```
@@ -145,7 +180,7 @@ The data is first loaded from one of a number of datasets.
 
 ```{r}
 get_text <- function(dataset) {
-dir.create(paste0(data_dir,'/',dataset))
+dir.create(paste0(data_dir,dataset))
 new_filepath <- paste0(data_dir,'/',dataset,"/",'interesting_data.rds')
 text <- read_xml_data(dataset)
 text <- text %>% filter(value != "")
@@ -157,8 +192,11 @@ organisations <- filter(parsedtxt,str_detect(entity,"ORG"))
 persons <- filter(parsedtxt,str_detect(entity,"PERSON"))
 noun <- filter(parsedtxt,str_detect(pos,"NOUN"))
 proper_noun <- filter(parsedtxt,str_detect(pos,"PROPN"))
-locations <- get_locations(geographies)
-interesting_data <- list(geographies,organisations,persons,noun,proper_noun,locations,text,parsedtxt)
+geographies_complete <- filter(proper_noun,entity !="") %>%
+  mutate(entity = ifelse(str_detect(entity,regex("[A-Z]+_B")),"GPE_B",
+                          ifelse(str_detect(entity,regex("[A-Z]+_I")),"GPE_I","O")))
+locations <- get_locations(geographies_complete)
+interesting_data <- list(geographies_complete,organisations,persons,noun,proper_noun,locations,text,parsedtxt)
 names(interesting_data) <- c('geographies','organisations','persons','noun','proper_noun','locations','text','parsedtxt')
 saveRDS(interesting_data,new_filepath)
 return(interesting_data)
@@ -187,19 +225,21 @@ google_checked_non_uk <- filter(google_checked, (lon<=8 | lon>=2) & (lat >= 61 |
 google_na <- filter(google_checked,is.na(lon) | is.na(lat))
 google_checked_non_uk <- rbind(google_checked_non_uk,google_na)
 
-google_checked_non_uk <- unique(select(google_checked_non_uk,token = result))
-google_checked_non_uk <- unique(left_join(google_checked_non_uk,select(parsedtxt, -doc_id,-sentence_id,-token_id)))
-google_checked_non_uk <- spacy_parse(as.character(google_checked_non_uk),tag=TRUE) %>%
-  select(-token_id)
-google_checked_non_uk <- unique(filter(google_checked_non_uk,str_detect(entity,"GPE")))
+#google_checked_non_uk <- unique(select(google_checked_non_uk))
+#google_checked_non_uk <- unique(left_join(google_checked_non_uk,select(parsedtxt, #-doc_id,-sentence_id,-token_id)))
+#google_checked_non_uk <- spacy_parse(as.character(google_checked_non_uk),tag=TRUE) %>%
+#  select(-token_id)
+#google_checked_non_uk <- unique(filter(google_checked_non_uk,str_detect(entity,"GPE")))
+google_checked_non_uk <- unique(google_checked_non_uk)
 test <- get_locations(google_checked_non_uk)
 
 google_checked_non_uk <- ask_google(test,uk=FALSE,dataset = dataset) %>%
   filter(!is.na(lon))
+  #select(doc_id,sentence_id,token_id,token,pos,tag,entity,lon,lat,inuk)
 
 google_checked_complete <- rbind(google_checked_uk,google_checked_non_uk)
 
-google_checked_complete <- mutate(google_checked_complete,result = str_replace(result," \'","\'"))
+google_checked_complete <- mutate(google_checked_complete,token = str_replace(token," \'","\'"))
 
 }
 saveRDS(google_checked_complete,filename)
@@ -212,45 +252,56 @@ Use the locations that have been checked by Google to replace annotations to the
 ```{r}
 prep_new_geographies <- function(google_checked_complete,geographies,dataset) {
 filename <- paste0(data_dir,"/",dataset,"/",'new_geographies.rds.csv')
-if(file.exists(filename)) {
+#if(file.exists(filename)) {
   #new_geographies <- readRDS(filename)
-  new_geographies <- read.csv(filename)
-} else {
+#  new_geographies <- read.csv(filename)
+#} else {
 #df <- select(google_checked_complete,result) 
-df <- filter(google_checked_complete,!str_detect(result,"(?!U\\.K\\.)(.+\\..\\.$)")) %>%
-  mutate(result=str_replace(result," \\'","\\'")) %>%
-  rename(token = result)
+df <- filter(google_checked_complete,!str_detect(token,"(?!U\\.K\\.)(.+\\..\\.$)")) %>%
+  mutate(token=str_replace(token," \\'","\\'"),
+         placename = token) 
 
-df <- separate(df,token,c("A","B","C","D"),sep = " ") %>%
-  pivot_longer(c("A","B","C","D")) %>%
-  mutate(ENTITY = ifelse(name=="A","GPE_B","GPE_I")) %>%
-  filter(!is.na(value)) %>%
-  select(value,ENTITY) %>%
-  rename(token = value)
+#df <- arrange(df,doc_id,sentence_id,token_id)
 
-new_geographies <- unique(right_join(geographies,df)) %>%
-  filter(!is.na(ENTITY)) 
-saveRDS(new_geographies,filename)
+
+#df <- separate(df,token,c("A","B","C","D","E","F"),sep = " ") %>%
+#  pivot_longer(c("A","B","C","D","E","F")) %>%
+#  mutate(ENTITY = ifelse(name=="A","GPE_B","GPE_I")) %>%
+#  filter(!is.na(value)) %>%
+#  select(value,ENTITY,placename) %>%
+#  rename(token = value)
+
+
+new_geographies <- unique(left_join(df,geographies)) %>%
+  filter(!is.na(entity)) %>%
+  arrange(doc_id,sentence_id,token_id) %>%
+  rename(ENTITY = entity)
+#aveRDS(new_geographies,filename)
 write.csv(new_geographies,paste0(filename,'.csv'))
 return(new_geographies)
 }
-}
+
 
 prep_new_parsed_text <- function(new_geographies,parsedtxt,dataset) {
 filename <- paste0(data_dir,"/",dataset,"/",'new_parsed_text.rds')
-if(file.exists(filename)) {
-  new_parsed_text <- readRDS(filename)
-} else {
-  
-new_parsed_text <- left_join(parsedtxt,new_geographies)
+#if(file.exists(filename)) {
+#  new_parsed_text <- readRDS(filename)
+#} else {
+
+new_geographies <- select(new_geographies,-pos,-tag,-lemma)
+
+new_parsed_text <- left_join(parsedtxt,new_geographies,
+                             by = c("doc_id", "sentence_id", "token_id", "token"))
 new_parsed_text <- 
   mutate(new_parsed_text,
           tag=ifelse(nchar(tag) < 2, pos, tag),
-          entity=ifelse(str_detect(entity,"GPE") & !entity==ENTITY,ENTITY,entity),
+          entity=ifelse(str_detect(ENTITY,"GPE"),ENTITY,entity),
           entity=ifelse(is.na(entity),"",entity), 
-          tagentity=ifelse(entity == "", tag, entity)) %>%
+          tagentity=ifelse(entity == "", tag, entity),
+          entityo=ifelse(str_detect(tagentity,"GPE"),tagentity,"O")) %>%
+          filter(pos == 'PUNCT')
   select(-ENTITY)
-}
+
 saveRDS(new_parsed_text,filename)
 return(new_parsed_text)
 }
@@ -265,13 +316,13 @@ return(new_parsed_text)
 ```{r}
 sentence_representation <- function(df,dataset) {
 filename <- paste0(data_dir,"/",dataset,"/",'sentence_representation.rds')
-if(file.exists(filename)){
-  mylist <- readRDS(filename)
-} else {
-df <-  select(df,doc_id,sentence_id,token,tag,entity,tagentity) %>%
+#if(file.exists(filename)){
+#  mylist <- readRDS(filename)
+#} else {
+df <-  select(df,doc_id,sentence_id,token,tag,entity,tagentity,entityo) %>%
   mutate(sent_id = as.numeric(paste0(str_extract(doc_id,'[0-9]+'),
                                      as.character(sentence_id)))) %>%
-  select(sent_id,token,tag,entity,tagentity)
+  select(sent_id,token,tag,entity,tagentity,entityo)
 mylist <- list()
 # note this code could be optimised
 for(line in unique(df$sent_id)) {
@@ -279,11 +330,12 @@ for(line in unique(df$sent_id)) {
   if(nrow(a) > 2) {
   sentence <- a$token
   tagentity <- a$tagentity
-  newline <- list(sentence,tagentity)
+  entityo <- a$entityo
+  newline <- list(sentence,tagentity,entityo)
   mylist <- append(mylist,list(newline))
   }
 }
-}
+
   saveRDS(mylist,filename)
   return(mylist)
 }
@@ -296,9 +348,9 @@ filename_train <- paste0(data_dir,"/",dataset,"/",'train_data.rds')
 filename_test <- paste0(data_dir,"/",dataset,"/",'test_data.rds')
 len <- length(data_set)
 if(train_model) {
-data_split <- as.integer(length(data_set)*3/4)
-train_data <- data_set[1:data_split]
-test_data <- data_set[data_split:len]
+data_split <- as.integer(length(data_set)*1/4)
+test_data <- data_set[1:data_split]
+train_data <- data_set[data_split:len]
 saveRDS(train_data,paste0(data_dir,filename_train))
 #traintest <- c(train_data,test_data)
 } else {
@@ -326,6 +378,8 @@ sent2features <- function(sentence_and_tag) {
     count <- count + 1
     wordfeats <- append(wordfeats,c('word' = sentence[[count]]))
     wordfeats <- append(wordfeats,c('tag' = sen_tags[[count]]))
+    #wordfeats <- append(wordfeats,c('capitalised' =
+    #              str_detect(sentence[[count]],regex('^[A-Z]'))))
     
     if(count == 1) {
       wordfeats <- append(wordfeats,(c("prevWord" = "<S>")))
@@ -342,6 +396,7 @@ sent2features <- function(sentence_and_tag) {
     wordfeats <- append(wordfeats,c("prevSecondWord" = sentence[[count-2]]))
     wordfeats <- append(wordfeats,c("prevTag" = sen_tags[[count-1]]))
     wordfeats <- append(wordfeats,c("prevSecondTag" = sen_tags[[count-2]]))
+    
     }
     
     if(count == length(sentence)) {
@@ -378,7 +433,7 @@ get_feats <- function(dta) {
   for(sent in dta) {
     if(length(sent[[1]]) > 2) {
       feats <- append(feats,sent2features(sent))
-      labels <- append(labels,list(sent[[2]]))
+      labels <- append(labels,list(sent[[3]]))
     } else {
      feats <- append(feats,NA)
       labels <- append(labels,NA)
@@ -522,6 +577,7 @@ def prep_python_env():
   dataset = r.dataset
   model = r.model
   train_model = r.train_model
+  print(train_model)
   from nltk.tag import pos_tag
   from sklearn.metrics import make_scorer,confusion_matrix
   from pprint import pprint
@@ -554,9 +610,14 @@ def prep_python_env():
       Y_dev = pickle.load(Y_dev_f)
     X_train = None
     Y_train = None
-  else:
+  elif train_model:
     X_train = r.X_train
     Y_train = r.Y_train
+    Y_dev = r.Y_dev
+    X_dev = r.X_dev
+  else: 
+    X_train = None
+    Y_train = None
     Y_dev = r.Y_dev
     X_dev = r.X_dev
   with open(X_train_file, 'wb') as X_train_f:
@@ -578,6 +639,7 @@ def train_seq(X_train,Y_train,X_dev,Y_dev):
   labels = list(crf.classes_)
   y_pred = crf.predict(X_dev)
   crfmodel = data_dir + '/' + dataset + '/' + 'crfmodel.obj'
+  print("SAVING MODEL.....")
   with open(crfmodel, 'wb') as output:  # Overwrites any existing file.
         pickle.dump(crf, output)
 ```
