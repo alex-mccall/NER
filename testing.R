@@ -29,19 +29,9 @@ return(c7)
 }
 
 #check_t1 <- check_train(X_train, Y_train, y_pred)
-check_t2 <- check_train(X_dev,Y_dev, y_pred) %>% filter(pred != "O") %>%
-  mutate(testing = identical(tag, y_pred)) %>%
-  filter(testing==FALSE)
+check_t2 <- check_train(X_dev,Y_dev, y_pred) %>% 
+#  filter(pred != "O") %>%
+  mutate(testing = (test==pred))
 
+unique(check_t2$testing)
 
-b <- check_data(train) 
-
-z1 <- unlist(training_data[[1]], recursive = FALSE)
-z2 <- unlist(training_data[[2]], recursive = FALSE)
-
-z3 <- cbind(z1,z2)
-z3 <- data.frame(z3)
-
-
-z1 <- data.frame(z1)
-z2 <- data.frame(z2)

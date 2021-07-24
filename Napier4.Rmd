@@ -299,7 +299,7 @@ new_parsed_text <-
           entity=ifelse(is.na(entity),"",entity), 
           tagentity=ifelse(entity == "", tag, entity),
           entityo=ifelse(str_detect(tagentity,"GPE"),tagentity,"O")) %>%
-          filter(pos == 'PUNCT')
+          filter(pos != 'PUNCT') %>%
   select(-ENTITY)
 
 saveRDS(new_parsed_text,filename)
@@ -530,25 +530,15 @@ pic <- ggplot(data =  df, mapping = aes(x = TClass, y = PClass, label)) +
 
 ```{r}
 get_result_data <- function(dataset) {
-  #X_train_filename <- paste0(data_dir,"/",dataset,"/",'X_train.rds')
-  #Y_train_filename <- paste0(data_dir,"/",dataset,"/",'Y_train.rds')
   X_dev_filename <- paste0(data_dir,"/",dataset,"/",'X_dev.rds')
   Y_dev_filename <- paste0(data_dir,"/",dataset,"/",'Y_dev.rds')
   Y_pred_filename <- paste0(data_dir,"/",dataset,"/",'Y_pred.rds')
   if(file.exists(Y_pred_filename)) {
-    #X_train <- readRDS(X_train_filename)
-    #Y_train <- readRDS(Y_train_filename)
-    #X_dev <- readRDS(X_dev_filename)
-    #Y_dev <- readRDS(Y_dev_filename)
     y_pred <- readRDS(Y_pred_filename)
   } else {
-    #X_train <- py$X_train
-    #Y_train <- py$Y_train
     X_dev <- py$X_dev
     Y_dev <- py$Y_dev
     y_pred <- py$y_pred
-    #saveRDS(X_train,X_train_filename)
-    #saveRDS(Y_train,Y_train_filename)
     saveRDS(X_dev,X_dev_filename)
     saveRDS(Y_dev,Y_dev_filename)
     saveRDS(y_pred,Y_pred_filename)

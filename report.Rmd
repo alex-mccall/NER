@@ -18,7 +18,7 @@ library(ggplot2)
 library(pkgcond)
 library(kableExtra)
 data_dir <- "../Data/"
-dataset <- 'GD45'
+dataset <- 'AF62'
 myresults_file <- paste0(data_dir,'/',dataset,'/','myresults.rds')
 results <- as.data.frame(readRDS(paste0(data_dir,'/',dataset,'/','results.rds')))
 names(results) = "Results"

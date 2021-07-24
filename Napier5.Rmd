@@ -86,15 +86,13 @@ if train_model:
 else:
   with open(model_file, 'rb') as model_f:
       crf = pickle.load(model_f)
-  y_pred = crf.predict(X_dev)
+y_pred = crf.predict(X_dev)
 ```
 
 
 ```{r}
 library(reticulate)
 saved_data <- get_result_data(dataset)
-#X_train <- saved_data[['X_train']]
-#Y_train <- saved_data[['Y_train']]
 X_dev <- saved_data[['X_dev']]
 Y_dev <- saved_data[['Y_dev']]
 y_pred <- saved_data[['y_pred']]
@@ -102,10 +100,8 @@ y_pred <- saved_data[['y_pred']]
 full_results <- get_full_results(X_dev,Y_dev,y_pred)
 
 predictions <- full_results$y_pred
-#test <- unlist(full_results$Y_dev)
 
 ner_results <-get_ner_results(full_results,predictions,test)
-mutate(full_results,X_dev = as.list(X_dev))
 results <- evaluate(full_results)
 confusion_matrix <- get_confusion_matrix(results['false_negatives'], results['true_positives'], results['true_negatives'], results['false_positives'])
 placenames <- unique(filter(ner_results,str_starts(predictions,"GPE"),
