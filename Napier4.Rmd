@@ -512,7 +512,6 @@ precision <- true_positives / predicted_positives
 recall <- true_positives / actual_positives
 FScore <- (2 * precision * recall) / (precision + recall)
 results <- c(false_positives,false_negatives,true_positives,true_negatives,precision,recall,FScore)
-results <- lapply(results,function(x) as.character(round(x, digits=3)))
 names(results) <- c('false_positives','false_negatives','true_positives','true_negatives','precision','recall','FScore')
 return(results)
 }
@@ -522,6 +521,7 @@ TClass <- factor(c(0, 0, 1, 1))
 PClass <- factor(c(0, 1, 0, 1))
 Y      <- c(false_negatives, true_positives, true_negatives, false_positives)
 df <- data.frame(TClass, PClass, Y)
+return(df)
 }
 
 draw_confusion_matrix <- function(df) {

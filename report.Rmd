@@ -19,7 +19,7 @@ library(pkgcond)
 library(data.table)
 library(kableExtra)
 data_dir <- "../Data/"
-dataset <- 'AF62'
+dataset <- 'GD45'
 myresults_file <- paste0(data_dir,'/',dataset,'/','myresults.rds')
 results <- as.data.frame(readRDS(paste0(data_dir,'/',dataset,'/','results.rds')))
 names(results) = "Results"
@@ -78,17 +78,20 @@ saveRDS(myresults, myresults_file)
 
 ```{r, 'reports', message=FALSE, warning=FALSE, results='asis', echo = FALSE, cache = FALSE}
 #placenames$word
-#options(scipen=999)
-Component <- c("False Positives", "False Negatives", "True Positives", "True Negatives",
+Measure <- c("False Positives", "False Negatives", "True Positives", "True Negatives",
               "Precision", "Recall", "Fscore")
-results <- data.frame(results)
-results <- transpose(results) 
-names(results) <- "Value"
-results <- cbind(Component,results)
-results %>%
+
+results_print <- results
+results_print <- lapply(results_print,function(x) as.character(round(x, digits=3)))
+results_print <- data.frame(results_print)
+results_print <- setDT(results_print, keep.rownames = FALSE)
+#results_print <- transpose(results_print) 
+names(results_print) <- "Value"
+results_print <- cbind(Measure,results_print) %>% select(Component, Value)
+results_print %>%
   kbl() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
-  row_spec(1:nrow(results),color='black')
+  row_spec(1:nrow(results_print),color='black')
 confusion_plot
 #knitr::kable(tester, caption = dataset)
 
