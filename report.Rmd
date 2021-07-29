@@ -1,6 +1,6 @@
 ---
 title: "Report"
-output: html_document
+output: word_document
 ---
 
 ```{r setup, include=FALSE}
@@ -16,6 +16,7 @@ library(stringr)
 library(stringi)
 library(ggplot2)
 library(pkgcond)
+library(data.table)
 library(kableExtra)
 data_dir <- "../Data/"
 dataset <- 'AF62'
@@ -77,10 +78,9 @@ saveRDS(myresults, myresults_file)
 
 ```{r, 'reports', message=FALSE, warning=FALSE, results='asis', echo = FALSE, cache = FALSE}
 #placenames$word
-options(scipen=999)
+#options(scipen=999)
 Component <- c("False Positives", "False Negatives", "True Positives", "True Negatives",
               "Precision", "Recall", "Fscore")
-results <- a
 results <- data.frame(results)
 results <- transpose(results) 
 names(results) <- "Value"
