@@ -97,10 +97,9 @@ geographies_a <- cbind(geographies,
 geographies_a <- geographies_a %>% replace(is.na(.), FALSE)  
 
 geographies_b <- mutate(geographies_a,
-                        result=ifelse(entity=='GPE_B' & entity1=='GPE_I' & entity2=='GPE_I' & entity3=='GPE_I',
+                        result=ifelse(str_detect(entity,'_B') & str_detect(entity2,'_I') & str_detect(entity2,'_I') & str_detect(entity3,'_I'),
                                       paste(token,token1,token2,token3),
-                               ifelse(entity=='GPE_B' & entity1=='GPE_I' & entity2=='GPE_I', paste(token,token1,token2),ifelse(entity=='GPE_B' & entity1=='GPE_I',paste(token,token1), paste(token)))))
-
+                               ifelse(str_detect(entity,'_B') & str_detect(entity1,'_I') & str_detect(entity2,'_I'), paste(token,token1,token2),ifelse(str_detect(entity,'_B') & str_detect(entity1,'_I'),paste(token,token1), paste(token)))))
 
 for(test in c(1:4)){
 geographies_res_before <- c(NA,geographies_b$result)
@@ -109,13 +108,13 @@ geographies_res_before <-geographies_res_before[1:length(geographies_res_before)
 geographies_b <- cbind(geographies_b,geographies_res_before)
 
 geographies_b <- mutate(geographies_b,
-                        result=ifelse(entity=='GPE_I', 
+                        result=ifelse(str_detect(entity,'_I'), 
                                       geographies_res_before,result))
 geographies_b <- select(geographies_b, -geographies_res_before)
 
 }
-geographies_b <- unique(filter(geographies_b,str_detect(entity,'GP'),
-                        str_detect(token,'GD',negate=TRUE)))
+#geographies_b <- unique(filter(geographies_b,str_detect(entity,'GP'),
+#                        str_detect(token,'GD',negate=TRUE)))
 #  select(result))
   return(geographies_b)
 }
@@ -128,7 +127,7 @@ The resulting data is also written to the file system to minimise the number of 
 ```{r message = FALSE, warning=FALSE}
 ask_google <- function(locations,dataset,uk=TRUE){
 filename <- paste0(data_dir,"/",dataset,"/","asked_google.rds")
-if(file.exists(filename)) {
+if(file.exists(filename) & uk) {
   df <- readRDS(filename)
 } else {
 key <- readRDS(paste0(data_dir,"google-key"))
@@ -158,19 +157,18 @@ if(uk){
 }
 
 df <- left_join(locations,df)
-locations <- select(locations,doc_id,sentence_id,token_id,entity,result) %>%
-  filter(entity == "GPE_B")
+locations <- select(df,doc_id,sentence_id,token_id,entity,result)
+#  filter(entity == "GPE_B")
 
 
 if(uk){
 df <- mutate(df, inuk = lon > -6 & lon < 4 & lat > 50 & lat < 61) 
   
-unknowns <- filter(df,is.na(inuk))
+#unknowns <- filter(df,is.na(inuk))
 
 }
 
 df <- select(df,doc_id,token,sentence_id,token_id,result,pos,tag,entity,lon,lat,inuk)
-
 
 return(df)
 }
@@ -192,12 +190,11 @@ organisations <- filter(parsedtxt,str_detect(entity,"ORG"))
 persons <- filter(parsedtxt,str_detect(entity,"PERSON"))
 noun <- filter(parsedtxt,str_detect(pos,"NOUN"))
 proper_noun <- filter(parsedtxt,str_detect(pos,"PROPN"))
-geographies_complete <- filter(proper_noun,entity !="") %>%
-  mutate(entity = ifelse(str_detect(entity,regex("[A-Z]+_B")),"GPE_B",
-                          ifelse(str_detect(entity,regex("[A-Z]+_I")),"GPE_I","O")))
-locations <- get_locations(geographies_complete)
-interesting_data <- list(geographies_complete,organisations,persons,noun,proper_noun,locations,text,parsedtxt)
-names(interesting_data) <- c('geographies','organisations','persons','noun','proper_noun','locations','text','parsedtxt')
+
+#change this if you want to alter the entity output
+locations <- get_locations(proper_noun)
+interesting_data <- list(organisations,persons,noun,proper_noun,locations,text,parsedtxt)
+names(interesting_data) <- c('organisations','persons','noun','proper_noun','locations','text','parsedtxt')
 saveRDS(interesting_data,new_filepath)
 return(interesting_data)
 }
@@ -220,8 +217,11 @@ if(file.exists(filename)) {
 google_checked_complete <- readRDS(filename)
 } else {
 google_checked <- filter(google_checked, str_detect(result,"GD",negate = TRUE))
-google_checked_uk <- filter(google_checked, lon> -8 & lon<2 & lat < 61 & lat > 50) 
-google_checked_non_uk <- filter(google_checked, (lon<=8 | lon>=2) & (lat >= 61 | lat <= 50))
+#google_checked_uk <- filter(google_checked, lon> -8 & lon<2 & lat < 61 & lat > 50) 
+#google_checked_non_uk <- filter(google_checked, (lon<=8 | lon>=2) & (lat >= 61 | lat <= 50))
+google_checked_uk <- filter(google_checked, inuk)
+google_checked_non_uk <- filter(google_checked, !inuk)
+
 google_na <- filter(google_checked,is.na(lon) | is.na(lat))
 google_checked_non_uk <- rbind(google_checked_non_uk,google_na)
 
@@ -252,10 +252,10 @@ Use the locations that have been checked by Google to replace annotations to the
 ```{r}
 prep_new_geographies <- function(google_checked_complete,geographies,dataset) {
 filename <- paste0(data_dir,"/",dataset,"/",'new_geographies.rds.csv')
-#if(file.exists(filename)) {
+if(file.exists(filename)) {
   #new_geographies <- readRDS(filename)
-#  new_geographies <- read.csv(filename)
-#} else {
+  new_geographies <- read.csv(filename)
+} else {
 #df <- select(google_checked_complete,result) 
 df <- filter(google_checked_complete,!str_detect(token,"(?!U\\.K\\.)(.+\\..\\.$)")) %>%
   mutate(token=str_replace(token," \\'","\\'"),
@@ -276,8 +276,9 @@ new_geographies <- unique(left_join(df,geographies)) %>%
   filter(!is.na(entity)) %>%
   arrange(doc_id,sentence_id,token_id) %>%
   rename(ENTITY = entity)
-#aveRDS(new_geographies,filename)
-write.csv(new_geographies,paste0(filename,'.csv'))
+saveRDS(new_geographies,filename)
+write.csv(new_geographies,filename)
+}
 return(new_geographies)
 }
 
@@ -296,9 +297,10 @@ new_parsed_text <-
   mutate(new_parsed_text,
           tag=ifelse(nchar(tag) < 2, pos, tag),
           entity=ifelse(str_detect(ENTITY,"GPE"),ENTITY,entity),
-          entity=ifelse(is.na(entity),"",entity), 
-          tagentity=ifelse(entity == "", tag, entity),
-          entityo=ifelse(str_detect(tagentity,"GPE"),tagentity,"O")) %>%
+          entity=ifelse(is.na(entity),"",entity),
+          label = ifelse(entity=="","O",entity)) %>% 
+   #       tagentity=ifelse(entity == "", tag, entity)) %>%
+   #       entityo=ifelse(str_detect(tagentity,"GPE"),tagentity,"O")) %>%
           filter(pos != 'PUNCT') %>%
   select(-ENTITY)
 
@@ -319,19 +321,22 @@ filename <- paste0(data_dir,"/",dataset,"/",'sentence_representation.rds')
 #if(file.exists(filename)){
 #  mylist <- readRDS(filename)
 #} else {
-df <-  select(df,doc_id,sentence_id,token,tag,entity,tagentity,entityo) %>%
+df <-  select(df,doc_id,sentence_id,token,pos,tag,entity,label) %>%
   mutate(sent_id = as.numeric(paste0(str_extract(doc_id,'[0-9]+'),
                                      as.character(sentence_id)))) %>%
-  select(sent_id,token,tag,entity,tagentity,entityo)
+  select(sent_id,token,pos,entity,label)
 mylist <- list()
 # note this code could be optimised
 for(line in unique(df$sent_id)) {
   a <- filter(df,sent_id == line)
   if(nrow(a) > 2) {
   sentence <- a$token
-  tagentity <- a$tagentity
-  entityo <- a$entityo
-  newline <- list(sentence,tagentity,entityo)
+  pos <- a$pos
+  entity <- a$entity
+  label <- a$label
+  #tagentity <- a$tagentity
+  #entityo <- a$entityo
+  newline <- list(sentence,pos,entity,label)
   mylist <- append(mylist,list(newline))
   }
 }
@@ -348,9 +353,9 @@ filename_train <- paste0(data_dir,"/",dataset,"/",'train_data.rds')
 filename_test <- paste0(data_dir,"/",dataset,"/",'test_data.rds')
 len <- length(data_set)
 if(train_model) {
-data_split <- as.integer(length(data_set)*1/4)
-test_data <- data_set[1:data_split]
-train_data <- data_set[data_split:len]
+data_split <- as.integer(length(data_set)*3/4)
+train_data <- data_set[1:data_split]
+test_data <- data_set[data_split:len]
 saveRDS(train_data,paste0(data_dir,filename_train))
 #traintest <- c(train_data,test_data)
 } else {
@@ -433,7 +438,8 @@ get_feats <- function(dta) {
   for(sent in dta) {
     if(length(sent[[1]]) > 2) {
       feats <- append(feats,sent2features(sent))
-      labels <- append(labels,list(sent[[3]]))
+      label <- append(labels,list(sent[[3]]))
+      labels <- append(labels,list(sent[[4]]))
     } else {
      feats <- append(feats,NA)
       labels <- append(labels,NA)
@@ -448,32 +454,44 @@ get_feats <- function(dta) {
 
 ```
 
+```{r}
+get_pos <- function(a){
+  b <- lapply(a, function(x) x = x[[2]])
+  return(b)
+}
+
+```
 
 
 
 ```{r}
 get_full_results <- function(X_dev,Y_dev,y_pred) {
-full_results <- data.frame(cbind(X_dev,Y_dev,y_pred))
+
+pos <- lapply(X_dev, function(x) x = get_pos(x))
+
+full_results <- data.frame(cbind(X_dev,pos,Y_dev,y_pred))
 full_results <- mutate(full_results,comp = as.character(y_pred)==as.character(Y_dev))
 return(full_results)
 }
 
-get_ner_results <- function(full_results,predictions,test) {
+get_ner_results <- function(full_results) {
 predictions <- unlist(full_results$y_pred)
 test <- unlist(full_results$Y_dev)
-ner_results <- data.frame(cbind(test,predictions))
+pos <- unlist(full_results$pos)
+ner_results <- data.frame(cbind(pos,test,predictions))
 ner_results <- mutate(ner_results,comp = as.character(test)==as.character(predictions))
 word_list <- unlist(full_results$X_dev, recursive  = FALSE)
 word_list <- data.frame(unlist(lapply(word_list,function(z) z[1])))
 names(word_list) = c('word')
-ner_results <-cbind(word_list,ner_results)
+ner_results <-cbind(word_list,ner_results) %>%
+  filter(pos == 'PROPN')
 }
 
 evaluate <- function(full_results) {
-
 predictions <- unlist(full_results$y_pred)
 test <- unlist(full_results$Y_dev)
-ner_results <- get_ner_results(full_results,predictions, test)
+ner_results <- get_ner_results(full_results)
+ner_results <- filter(ner_results,str_detect(test,'GPE')|str_detect(predictions,'GPE'))
 summ <- data.frame(table(full_results$comp),row.names = TRUE)
 total_predictions <- sum(summ$Freq)
 correct_predictions <- summ['TRUE',]
@@ -494,7 +512,7 @@ precision <- true_positives / predicted_positives
 recall <- true_positives / actual_positives
 FScore = (2 * precision * recall) / (precision + recall)
 results <- c(false_positives,false_negatives,true_positives,true_negatives,precision,recall,FScore)
-names(results) <- c('false_positives','false_negatives','true_positives','true_negatives','p#recision','recall','FScore')
+names(results) <- c('false_positives','false_negatives','true_positives','true_negatives','precision','recall','FScore')
 return(results)
 }
 
@@ -621,18 +639,6 @@ def prep_python_env():
   return X_train, Y_train, X_dev, Y_dev, train_model, model_file
 ```
 
-```{python}
-#Train a sequence model
-def train_seq(X_train,Y_train,X_dev,Y_dev):
-  crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
-  crf.fit(X_train, Y_train)
-  labels = list(crf.classes_)
-  y_pred = crf.predict(X_dev)
-  crfmodel = data_dir + '/' + dataset + '/' + 'crfmodel.obj'
-  print("SAVING MODEL.....")
-  with open(crfmodel, 'wb') as output:  # Overwrites any existing file.
-        pickle.dump(crf, output)
-```
 
 
 

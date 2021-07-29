@@ -78,6 +78,13 @@ saveRDS(myresults, myresults_file)
 ```{r, 'reports', message=FALSE, warning=FALSE, results='asis', echo = FALSE, cache = FALSE}
 #placenames$word
 options(scipen=999)
+Component <- c("False Positives", "False Negatives", "True Positives", "True Negatives",
+              "Precision", "Recall", "Fscore")
+results <- a
+results <- data.frame(results)
+results <- transpose(results) 
+names(results) <- "Value"
+results <- cbind(Component,results)
 results %>%
   kbl() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%

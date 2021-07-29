@@ -17,8 +17,6 @@ model_path <- paste0(data_dir,"/",model,"/",'crfmodel.obj')
 train_model <- !file.exists(model_path)
 
 interesting_data <- get_text(dataset)
-geog <- interesting_data[['geographies']]
-loc <- interesting_data[['locations']]
 
 google_checked <- ask_google(interesting_data[['locations']],dataset)
 google_checked_complete <- get_google_checked_complete(google_checked, 
@@ -26,7 +24,7 @@ google_checked_complete <- get_google_checked_complete(google_checked,
                                                        dataset)
 
 new_geographies <- prep_new_geographies(google_checked_complete,
-                                        interesting_data[['geographies']],
+                                        interesting_data[['proper_noun']],
                                         dataset)
 ```
 
@@ -57,6 +55,7 @@ testing_data <- get_feats(test)
 X_dev  <- testing_data[[1]]
 Y_dev <- testing_data[[2]]
 
+
 ```
 
 ```{python}
@@ -76,7 +75,7 @@ X_train,Y_train,X_dev, Y_dev, train_model,model_file = prep_python_env()
 print(train_model)
 if train_model: 
   print("TRAINING......")
-  crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
+  crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=100)
   #Just to fit on training data
   crf.fit(X_train, Y_train)
   #labels = list(crf.classes_)
@@ -87,6 +86,7 @@ else:
   with open(model_file, 'rb') as model_f:
       crf = pickle.load(model_f)
 y_pred = crf.predict(X_dev)
+
 ```
 
 
@@ -99,9 +99,9 @@ y_pred <- saved_data[['y_pred']]
 
 full_results <- get_full_results(X_dev,Y_dev,y_pred)
 
-predictions <- full_results$y_pred
+#predictions <- full_results$y_pred
 
-ner_results <-get_ner_results(full_results,predictions,test)
+ner_results <-get_ner_results(full_results)
 results <- evaluate(full_results)
 confusion_matrix <- get_confusion_matrix(results['false_negatives'], results['true_positives'], results['true_negatives'], results['false_positives'])
 placenames <- unique(filter(ner_results,str_starts(predictions,"GPE"),
