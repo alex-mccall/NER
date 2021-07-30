@@ -524,22 +524,28 @@ df <- data.frame(TClass, PClass, Y)
 return(df)
 }
 
-draw_confusion_matrix <- function(df) {
+draw_confusion_matrix <- function(df,dataset,model) {
 pic <- ggplot(data =  df, mapping = aes(x = TClass, y = PClass, label)) +
   geom_tile(aes(fill = c(1,2,3,4)), colour = "white") +
   geom_text(aes(label = sprintf("%1.0f", Y)), vjust = 1) +
-  scale_fill_gradient(low = "green1", high = "green4") +
+  scale_fill_gradient(low = "skyblue", high = "skyblue3") +
+  #scale_fill_distiller() +
   scale_x_discrete(breaks=c("0","1"),
         labels=c("Positive", "Negative")) +
   scale_y_discrete(breaks=c("0","1"),
         labels=c("Negative", "Positive")) +
+  labs(title = paste(dataset,": Model trained on",model), 
+       x = "Actual Results", y = "Predictions") +
   theme_minimal() + theme(legend.position = "none") +
   theme(axis.text.y = element_text(face="bold", color="#993333", 
-                          size=14, angle=90, hjust = 1)) +
+                          size=14, angle=90)) +
   theme(axis.text.x = element_text(face="bold", color="#993333", 
                           size=14)) +
-  theme(axis.title = element_blank()) +
-  theme(axis.ticks = element_blank())
+  theme(axis.ticks = element_blank()) +
+  theme(plot.title = element_text(size = 30),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text.y = element_text(hjust = 0.5))
   ggtitle("Confusion Matrix")
   return(pic)
 }
