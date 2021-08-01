@@ -242,6 +242,7 @@ google_checked_complete <- rbind(google_checked_uk,google_checked_non_uk)
 google_checked_complete <- mutate(google_checked_complete,token = str_replace(token," \'","\'"))
 
 }
+print("SAVING google_checked_complete")
 saveRDS(google_checked_complete,filename)
 return(google_checked_complete)
 }
@@ -383,6 +384,7 @@ sent2features <- function(sentence_and_tag) {
     count <- count + 1
     wordfeats <- append(wordfeats,c('word' = sentence[[count]]))
     wordfeats <- append(wordfeats,c('tag' = sen_tags[[count]]))
+    wordfeats <- append(wordfeats,(c("Capital" = str_detect(sentence[[count]], "^[:upper:].+$"))))
     #wordfeats <- append(wordfeats,c('capitalised' =
     #              str_detect(sentence[[count]],regex('^[A-Z]'))))
     
@@ -391,34 +393,46 @@ sent2features <- function(sentence_and_tag) {
       wordfeats <- append(wordfeats,(c("prevSecondWord" = "<S>")))
       wordfeats <- append(wordfeats,(c("prevTag" = "<S>")))
       wordfeats <- append(wordfeats,(c("prevSecondTag" = "<S>")))
+      wordfeats <- append(wordfeats,(c("prevCapital" = "<S>")))
+      wordfeats <- append(wordfeats,(c("prevSecondCapital" = "<S>")))
     } else if(count == 2) {
       wordfeats <- append(wordfeats,c("prevWord" = sentence[[count-1]]))
       wordfeats <- append(wordfeats,c("prevSecondWord" = "</S>"))
       wordfeats <- append(wordfeats,c("prevTag" = sen_tags[[count-1]]))
       wordfeats <- append(wordfeats,c("prevSecondTag" = "</S>"))
+      wordfeats <- append(wordfeats,(c("prevCapital" = str_detect(sentence[[count-1]], "^[:upper:].+$"))))
+      wordfeats <- append(wordfeats,(c("prevSecondCapital" = "<S>")))
     } else {
     wordfeats <- append(wordfeats,c("prevWord" = sentence[[count-1]]))
     wordfeats <- append(wordfeats,c("prevSecondWord" = sentence[[count-2]]))
     wordfeats <- append(wordfeats,c("prevTag" = sen_tags[[count-1]]))
     wordfeats <- append(wordfeats,c("prevSecondTag" = sen_tags[[count-2]]))
-    
+    wordfeats <- append(wordfeats,(c("prevCapital" = str_detect(sentence[[count-1]], "^[:upper:].+$"))))
+    wordfeats <- append(wordfeats,(c("prevSecondCapital" = str_detect(sentence[[count-2]], "^[:upper:].+$"))))
     }
-    
     if(count == length(sentence)) {
       wordfeats<- append(wordfeats,c("nextWord" =  "</S>"))
       wordfeats = append(wordfeats,c("nextNextWord" =  "</S>"))
       wordfeats<- append(wordfeats,c("nextTag" =  "</S>"))
       wordfeats = append(wordfeats,c("nextNextTag" =  "</S>"))
+      wordfeats <- append(wordfeats,(c("nextCapital" = "</S>")))
+      wordfeats <- append(wordfeats,(c("nextSecondCapital" = "</S>")))
+
     } else if(count == length(sentence)-1) {
       wordfeats <- append(wordfeats,c("nextWord" = sentence[[count +1]]))
       wordfeats <- append(wordfeats,c("nextNextWord" ="</S>"))
       wordfeats <- append(wordfeats,c("nextTag" =sen_tags[[count +1]]))
       wordfeats <- append(wordfeats,c("nextNextTag" =  "</S>"))
+      wordfeats <- append(wordfeats,(c("nextCapital" = str_detect(sentence[[count+1]], "^[:upper:].+$"))))
+      wordfeats <- append(wordfeats,(c("nextSecondCapital" ="</S>")))
     } else if(count < length(sentence)-1) {
       wordfeats = append(wordfeats,c("nextWord" = sentence[[count+1]]))
       wordfeats  = append(wordfeats,c("nextNextWord" = sentence[[count+2]]))
       wordfeats = append(wordfeats,c("nextTag" = sen_tags[[count+1]]))
       wordfeats  = append(wordfeats,c("nextNexTag" = sen_tags[[count+2]]))
+
+      wordfeats <- append(wordfeats,(c("nextCapital" = str_detect(sentence[[count+1]], "^[:upper:].+$"))))
+      wordfeats <- append(wordfeats,(c("nextSecondCapital" = str_detect(sentence[[count+2]], "^[:upper:].+$"))))
     }
         features <- append(features,list(wordfeats))
         feb <- list(features)
@@ -491,7 +505,8 @@ evaluate <- function(full_results) {
 predictions <- unlist(full_results$y_pred)
 test <- unlist(full_results$Y_dev)
 ner_results <- get_ner_results(full_results)
-ner_results <- filter(ner_results,str_detect(test,'GPE')|str_detect(predictions,'GPE'))
+#ner_results <- filter(ner_results,str_detect(test,'GPE')|str_detect(predictions,'GPE'))
+ner_results <- filter(ner_results,test != "O"|predictions !="O")
 summ <- data.frame(table(full_results$comp),row.names = TRUE)
 total_predictions <- sum(summ$Freq)
 correct_predictions <- summ['TRUE',]
@@ -551,6 +566,32 @@ pic <- ggplot(data =  df, mapping = aes(x = TClass, y = PClass, label)) +
 }
 
 ```
+
+```{r}
+review_results <- function(full_results) {
+  X_dev <- full_results$X_dev
+  X_dev <- lapply(X_dev, function(x) lapply(x, function(y) y[['word']]))
+  training <- lapply(full_results$Y_dev, function(x) as.vector(str_detect(x,"GPE")))
+  predictions <- lapply(full_results$y_pred, function(x) as.vector(str_detect(x,"GPE")))
+  prediction_words <- list()
+  training_words <- list()
+  for(i in 1:length(X_dev)) {
+    xd <- unlist(X_dev[[i]])
+    pw <- predictions[[i]]
+    tw <- training[[i]]
+    px <- as.list(xd[pw])
+    tx <- as.list(xd[tw])
+    prediction_words <- append(prediction_words,list(px))
+    training_words <- append(training_words,list(tx))
+  }
+  z <- as.data.frame(cbind(X_dev,training_words,prediction_words))
+  #w <- mutate(z,Z_dev = paste(unlist(X_dev), collapse = ' ')) 
+  #  training_words = paste(training_words, collapse = ' '),
+  #  prediction_words = paste(prediction_words, collapse = ' '))
+return(z)
+}
+```
+
 
 
 ```{r}

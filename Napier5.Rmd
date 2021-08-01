@@ -115,6 +115,13 @@ prose <- paste(ner_results$highlights, collapse=' ', sep="")
 
 save_results(results,prose,ner_results,confusion_matrix,placenames,pic,dataset)
 
+a <-review_results(full_results)
+
+#b <-a
+#b <-head(a)
+#c <- b$X_dev
+#d <- lapply(c, function(x) paste(unlist(x[[1]], recursive = FALSE), collapse = " "))
+#c <- mutate(b,V = list.flatten(X_dev[[1]], classes = "character"))
 ```
 
 
