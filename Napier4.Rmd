@@ -126,57 +126,21 @@ For each identified name, request a location (i.e. latitude and longitude) from 
 
 The resulting data is also written to the file system to minimise the number of times google needs to be interrogated (there is a potential cost if interrogated too many times)
 
-```{r message = FALSE, warning=FALSE}
-ask_google <- function(locations,dataset,uk=TRUE){
-filename <- paste0(data_dir,"/",dataset,"/","asked_google.rds")
-if(file.exists(filename) & uk) {
-  df <- readRDS(filename)
-} else {
-key <- readRDS(paste0(data_dir,"google-key"))
-key <- "AIzaSyAteiy4rXSlisMAn5Lk6lnf0EGMIOJUiOc"
-save
-register_google(key = key)
-df <- data.frame(gram = character(),lon = double(0), lat = double(0))
-counter=0
-#geographies_b <- geographies()
-for(gram in unique(locations$result)) {
-  counter <- counter + 1
-  if(uk){
-    gram1 <- paste0(gram,',','UK')
-  } else {
-    gram1 = gram
-  }
-  coord <- cbind(gram,geocode(gram1))
-  df <- rbind(df,coord)
-  print(paste
-        (counter,gram))
-}
 
-
-names(df) <- c('result','lon','lat')
-
-if(uk){
-  saveRDS(df,filename)
-}
-}
-
-df <- left_join(locations,df)
-locations <- select(df,doc_id,sentence_id,token_id,entity,result)
-#  filter(entity == "GPE_B")
-
-
-if(uk){
-df <- mutate(df, inuk = lon > -6 & lon < 4 & lat > 50 & lat < 61) 
-  
-#unknowns <- filter(df,is.na(inuk))
-
-}
-
-df <- select(df,doc_id,token,sentence_id,token_id,result,pos,tag,entity,lon,lat,inuk)
-
+```{r}
+ask_google <- function(locations,dataset){
+#filename <- paste0(data_dir,"/",dataset,"/","asked_google.rds")
+#if(file.exists(filename)) {
+#  df <- readRDS(filename)
+#} else {
+location_names <- unique(locations$result)
+location_data <- google_find(location_names)
+location_data <- rename(location_data,result = 'address...1')
+df <- left_join(locations,location_data)
 return(df)
 }
 ```
+
 
 The data is first loaded from one of a number of datasets.  
 
@@ -213,50 +177,6 @@ return(interesting_data)
 }
 ```
 
-
-
-now that we have found some Geogrpaphies, we can try and get their latitiude and longitude, to confirm whether they are real places or not.
-
-First, get UK codes
-
-
-```{r}
-get_google_checked_complete <- function(google_checked,parsedtxt,dataset){
-filename <- paste0(data_dir,"/",dataset,"/","google_checked_complete.rds")
-if(file.exists(filename)) {
-google_checked_complete <- readRDS(filename)
-} else {
-google_checked <- filter(google_checked, str_detect(result,"GD",negate = TRUE))
-#google_checked_uk <- filter(google_checked, lon> -8 & lon<2 & lat < 61 & lat > 50) 
-#google_checked_non_uk <- filter(google_checked, (lon<=8 | lon>=2) & (lat >= 61 | lat <= 50))
-google_checked_uk <- filter(google_checked, inuk)
-google_checked_non_uk <- filter(google_checked, !inuk)
-
-google_na <- filter(google_checked,is.na(lon) | is.na(lat))
-google_checked_non_uk <- rbind(google_checked_non_uk,google_na)
-
-#google_checked_non_uk <- unique(select(google_checked_non_uk))
-#google_checked_non_uk <- unique(left_join(google_checked_non_uk,select(parsedtxt, #-doc_id,-sentence_id,-token_id)))
-#google_checked_non_uk <- spacy_parse(as.character(google_checked_non_uk),tag=TRUE) %>%
-#  select(-token_id)
-#google_checked_non_uk <- unique(filter(google_checked_non_uk,str_detect(entity,"GPE")))
-google_checked_non_uk <- unique(google_checked_non_uk)
-test <- get_locations(google_checked_non_uk)
-
-google_checked_non_uk <- ask_google(test,uk=FALSE,dataset = dataset) %>%
-  filter(!is.na(lon))
-  #select(doc_id,sentence_id,token_id,token,pos,tag,entity,lon,lat,inuk)
-
-google_checked_complete <- rbind(google_checked_uk,google_checked_non_uk)
-
-google_checked_complete <- mutate(google_checked_complete,token = str_replace(token," \'","\'"))
-
-}
-print("SAVING google_checked_complete")
-saveRDS(google_checked_complete,filename)
-return(google_checked_complete)
-}
-```
 
 Use the locations that have been checked by Google to replace annotations to the text
 
@@ -303,10 +223,17 @@ new_parsed_text <-
    #       entityo=ifelse(str_detect(tagentity,"GPE"),tagentity,"O")) %>%
           filter(pos != 'PUNCT') %>%
   select(-ENTITY)
-  found <- lapply(new_parsed_text$result, function(x)
-                  is_place(x))
-  found <- t(as.data.frame(found))
-   new_parsed_text <- cbind(new_parsed_text,found)
+  #found <- lapply(new_parsed_text$result, function(x)
+  #                is_place(x))
+  #found <- t(as.data.frame(found))
+  found <- google_find(new_parsed_text$result) %>%
+    mutate(found = TRUE) %>%
+    rename(result = 'address...1') %>%
+    select(result,found)
+  
+  
+   new_parsed_text <- left_join(new_parsed_text,found)
+     
   
 
 saveRDS(new_parsed_text,filename)
@@ -664,43 +591,78 @@ saveRDS(pic,paste0(data_dir,'/',dataset,"/",'confusion_plot.rds'))
 }
 ```
 
-Code for preparing google data as a sentence feature.
 
 ```{r}
+prep_new_data <- function(locations) {
+  locations <- unique(locations)
+  locations <- as.data.frame(locations)
+  #local <- slice_sample(local,n=10)
+  names(locations) <- 'address'
+  return(locations)
+}
 
-is_place <- function(entity) {
-  place_list_file <- "places.rds"
-  exists <- file.exists(place_list_file)
-  if(!exists) {
-    place_cache <-list()
-    saveRDS(place_cache,place_list_file)
+get_google_data <- function(local) {
+  local <- data.frame(local)
+  names(local) <- "address"
+  local <- mutate(local,address = ifelse(is.na(address),"",address))
+  if(!is.null(nrow(local))) {
+  df <- mutate_geocode(local, address, output = 'more')
+  return(df)
   }
-  place_cache <- readRDS(place_list_file)
-  if(is.na(entity)) {
-    print("ignore")
-    return("")
-  }
-if(entity %in% place_cache) {
-  print(paste('found',entity,'localy'))
-  is_country <- TRUE
-  return(is_country)
-} 
-entityuk <- paste(entity,",UK")
-google_response <- geocode(entityuk, output = 'all')
-google_response <- google_response[['results']][[1]]
-location <- google_response[['geometry']][[1]][[1]]
-length_address <- length(google_response[['address_components']])
-country <- google_response[['address_components']][[length_address]]
-country <- unlist(google_response[['address_components']])
-is_country <- "Scotland" %in% country
-if(is_country) {
-  place_cache <- append(place_cache,entity)
-  saveRDS(place_cache,place_list_file)
-  print(paste('saving ',entity))
 }
-return(is_country)
+
+add_data <- function(latest,allplaces) {
+  rbind(allplaces,latest)
 }
+
+make_all_data <- function() {
+  a <- data.frame(address = character(1))
+  a <- mutate_geocode(a, address, output = 'more')[-1,]
+  return(a)
+}
+
+check_new_data <- function(new_data,all_places) {
+  results <- !(lapply(new_data[[1]], tolower) %in% lapply(all_places$address...1, tolower))
+  return(new_data$address[results])
+}
+
+check_existing_data <- function(new_data,all_places) {
+  results <- (lapply(new_data[[1]], tolower) %in% lapply(all_places$address...1, tolower))
+  return(new_data$address[results])
+}
+
+save_places <- function(all_places) {
+  saveRDS(all_places,paste0(data_dir,'google_db.rds'))
+}
+
+
+extract_data <- function(all_new_places,all_places) {
+  results <- (lapply(all_places$address...1, tolower) %in% lapply(all_new_places, tolower))
+  return(unique(all_places[results,]))
+}
+
+google_find <- function(locations) {
+all_places <- readRDS(paste0(data_dir,'google_db.rds'))
+all_places <- mutate(all_places, address...1 = ifelse(is.na(address...1),"",address...1))
+new_data <- prep_new_data(locations)
+additional_locations <- data.frame()
+existing_places <- check_existing_data(new_data,all_places)
+additional_places <- check_new_data(new_data,all_places)
+if(length(additional_places) != 0) {
+   if(!is.na(additional_places)) {
+additional_locations <- get_google_data(additional_places)
+}
+}
+all_places <- rbind(all_places, additional_locations)
+save_places(all_places)
+all_new_places <- c(existing_places,additional_places)
+results <- extract_data(all_new_places,all_places)
+return(results)
+}
+
+
 ```
+
 
 New code for training, using kfold cross validation, but the evaluation data is still based on 3/4 split of data.  This should be updated when I get a chance.
 

@@ -29,9 +29,9 @@ train_model <- !file.exists(model_path)
 interesting_data <- get_text(dataset)
 
 google_checked <- ask_google(interesting_data[['locations']],dataset)
-google_checked_complete <- get_google_checked_complete(google_checked, 
-                                                  interesting_data[['parsedtxt']],
-                                                       dataset)
+#google_checked_complete <- get_google_checked_complete(google_checked, 
+#                                                  interesting_data[['parsedtxt']],
+#                                                       dataset)
 
 new_geographies <- prep_new_geographies(google_checked_complete,
                                         interesting_data[['proper_noun']],
