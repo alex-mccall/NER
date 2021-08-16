@@ -7,8 +7,9 @@ NER on archive data
 
 I want to combine the power (and my knowledge of R), with the power (and machine learning capabilities of Python).
 
-
 Load the set of libraries as well as some basic variables, such as the pointer to where data is stored and the key to access google maps api.
+
+A conda python environment has been set up to allow tight control over the python environment and the integration with R.  
 
 ```{r}
 prep_r_env <- function() {
@@ -21,6 +22,7 @@ library(stringr)
 library(spacyr)
 library(editData)
 spacy_initialize(condaenv = 'NER')
+
 }
 ```
 
@@ -42,12 +44,13 @@ return(df)
 
 ```
 
-groups of 4 words in each sentence are ana lysed, to cature entities up to four words long.
+groups of 4 words in each sentence are analysed, to cature entities up to four words long.
 get only unique values to reduce the number of calls to google.
 
 ```{r}
 get_locations <- function(geographies) {
 rows <- nrow(geographies)-4
+geographies <- arrange(geographies,doc_id,sentence_id,token_id)
 #geographies_places <- data.frame(places=geographies$token[-1])
 geographies_entity <- geographies$entity[-1]
 geographies_entity <- append(geographies_entity,NA)
@@ -63,6 +66,9 @@ geographies_entity3 <- append(geographies_entity3,NA)
 geographies_entity3 <- append(geographies_entity3,NA)
 geographies_entity3 <- append(geographies_entity3,NA)
 geographies_entity3 <- append(geographies_entity3,NA)
+
+
+
 
 geographies_places <- geographies$token[-1]
 geographies_places <- append(geographies_places,NA)
@@ -89,17 +95,29 @@ geographies_a <- cbind(geographies,
                        token3=geographies_places2,
                        token4=geographies_places3)
 
+
 geographies_a <- geographies_a %>% replace(is.na(.), FALSE)  
 
 geographies_b <- mutate(geographies_a,
-                        result=ifelse(entity=='GPE_B' & entity1=='GPE_I' & entity2=='GPE_I' & entity3=='GPE_I',
+                        result=ifelse(str_detect(entity,'_B') & str_detect(entity2,'_I') & str_detect(entity2,'_I') & str_detect(entity3,'_I'),
                                       paste(token,token1,token2,token3),
-                               ifelse(entity=='GPE_B' & entity1=='GPE_I' & entity2=='GPE_I', paste(token,token1,token2),ifelse(entity=='GPE_B' & entity1=='GPE_I',paste(token,token1), paste(token)))))
+                               ifelse(str_detect(entity,'_B') & str_detect(entity1,'_I') & str_detect(entity2,'_I'), paste(token,token1,token2),ifelse(str_detect(entity,'_B') & str_detect(entity1,'_I'),paste(token,token1), paste(token)))))
 
+for(test in c(1:4)){
+geographies_res_before <- c(NA,geographies_b$result)
+geographies_res_before <-geographies_res_before[1:length(geographies_res_before)-1]
 
-geographies_b <- unique(filter(geographies_b,entity == 'GPE_B',
-                        str_detect(token,'GD',negate=TRUE)) %>%
-  select(result))
+geographies_b <- cbind(geographies_b,geographies_res_before)
+
+geographies_b <- mutate(geographies_b,
+                        result=ifelse(str_detect(entity,'_I'), 
+                                      geographies_res_before,result))
+geographies_b <- select(geographies_b, -geographies_res_before)
+
+}
+#geographies_b <- unique(filter(geographies_b,str_detect(entity,'GP'),
+#                        str_detect(token,'GD',negate=TRUE)))
+#  select(result))
   return(geographies_b)
 }
 ```
@@ -108,257 +126,282 @@ For each identified name, request a location (i.e. latitude and longitude) from 
 
 The resulting data is also written to the file system to minimise the number of times google needs to be interrogated (there is a potential cost if interrogated too many times)
 
-```{r message = FALSE, warning=FALSE}
-ask_google <- function(geographies,uk=TRUE,dataset){
-filename <- paste0(data_dir,"/",dataset,"/","asked_google.rds")
-if(file.exists(filename)) {
-  df <- readRDS(filename)
-} else {
-key <- readRDS(paste0(data_dir,"google-key"))
-register_google(key = key)
-df <- data.frame(lon = double(0), lat = double(0))
-counter=0
-#geographies_b <- geographies()
-for(gram in geographies$result) {
-  counter <- counter + 1
-  if(uk){
-    gram <- paste0(gram,',','UK')
-  }
-  coord <- geocode(gram)
-  df <- rbind(df,coord)
-  print(paste
-        (counter,gram))
-  
-}
 
-df <- cbind(geographies,df)
-if(uk){
-df <- mutate(df, inuk = lon > -6 & lon < 4 & lat > 50 & lat < 61)
-unknowns <- filter(df,is.na(inuk))
-}
-saveRDS(df,filename)}
+```{r}
+ask_google <- function(locations,dataset){
+#filename <- paste0(data_dir,"/",dataset,"/","asked_google.rds")
+#if(file.exists(filename)) {
+#  df <- readRDS(filename)
+#} else {
+location_names <- unique(locations$result)
+location_data <- google_find(location_names)
+location_data <- rename(location_data,result = 'address...1')
+df <- left_join(locations,location_data)
 return(df)
 }
 ```
+
 
 The data is first loaded from one of a number of datasets.  
 
 ```{r}
 get_text <- function(dataset) {
-dir.create(paste0(data_dir,'/',dataset))
+dir.create(paste0(data_dir,dataset))
 new_filepath <- paste0(data_dir,'/',dataset,"/",'interesting_data.rds')
 text <- read_xml_data(dataset)
 text <- text %>% filter(value != "")
 sentences <- data.frame(sapply(text,function(z) {rbind(data.frame(sentence = character(0)),z)}))
 sentences <- paste0(sentences$value)
 parsedtxt <- spacy_parse(sentences,tag=TRUE) 
+nounphrases <- spacy_extract_nounphrases(
+  sentences,
+  output = c("data.frame", "list"),
+  multithread = TRUE,
+)
 geographies <- filter(parsedtxt,str_detect(entity,"GPE"))
 organisations <- filter(parsedtxt,str_detect(entity,"ORG"))
 persons <- filter(parsedtxt,str_detect(entity,"PERSON"))
 noun <- filter(parsedtxt,str_detect(pos,"NOUN"))
-proper_noun <- filter(parsedtxt,str_detect(pos,"PROPN"))
-locations <- get_locations(geographies)
-interesting_data <- list(geographies,organisations,persons,noun,proper_noun,locations,text,parsedtxt)
-names(interesting_data) <- c('geographies','organisations','persons','noun','proper_noun','locations','text','parsedtxt')
+proper_noun <- filter(parsedtxt,str_detect(pos,"PROPN")) %>%
+               mutate(entity = ifelse(entity == "","GPE_B",entity))
+
+p <- group_by(nounphrases,doc_id) %>%
+  summarise(all = paste(text, collapse = " "))
+
+proper_noun <- left_join(proper_noun,p)
+#change this if you want to alter the entity output
+locations <- get_locations(proper_noun)
+interesting_data <- list(organisations,persons,noun,proper_noun,locations,text,parsedtxt)
+names(interesting_data) <- c('organisations','persons','noun','proper_noun','locations','text','parsedtxt')
 saveRDS(interesting_data,new_filepath)
 return(interesting_data)
 }
 ```
 
 
-
-
-
-
-now that we have found some Geogrpaphies, we can try and get their latitiude and longitude, to confirm whether they are real places or not.
-
-First, get UK codes
-
-
-```{r}
-get_google_checked_complete <- function(google_checked,parsedtxt,dataset){
-filename <- paste0(data_dir,"/",dataset,"/","google_checked_complete.rds")
-if(file.exists(filename)) {
-google_checked_complete <- readRDS(filename)
-} else {
-google_checked <- filter(google_checked, str_detect(result,"GD",negate = TRUE))
-google_checked_uk <- filter(google_checked, lon> -8 & lon<2 & lat < 61 & lat > 50) 
-google_checked_non_uk <- filter(google_checked, (lon<=8 | lon>=2) & (lat >= 61 | lat <= 50))
-google_na <- filter(google_checked,is.na(lon) | is.na(lat))
-google_checked_non_uk <- rbind(google_checked_non_uk,google_na)
-
-google_checked_non_uk <- unique(select(google_checked_non_uk,token = result))
-google_checked_non_uk <- unique(left_join(google_checked_non_uk,select(parsedtxt, -doc_id,-sentence_id,-token_id)))
-google_checked_non_uk <- spacy_parse(as.character(google_checked_non_uk),tag=TRUE) %>%
-  select(-token_id)
-google_checked_non_uk <- unique(filter(google_checked_non_uk,str_detect(entity,"GPE")))
-test <- get_locations(google_checked_non_uk)
-
-google_checked_non_uk <- ask_google(test,uk=FALSE,dataset = dataset) %>%
-  filter(!is.na(lon))
-
-google_checked_complete <- rbind(google_checked_uk,google_checked_non_uk)
-
-google_checked_complete <- mutate(google_checked_complete,result = str_replace(result," \'","\'"))
-
-}
-saveRDS(google_checked_complete,filename)
-return(google_checked_complete)
-}
-```
-
 Use the locations that have been checked by Google to replace annotations to the text
 
 ```{r}
-prep_new_geographies <- function(google_checked_complete,geographies,dataset) {
+prep_new_geographies <- function(google_checked,geographies,dataset) {
 filename <- paste0(data_dir,"/",dataset,"/",'new_geographies.rds.csv')
 if(file.exists(filename)) {
-  #new_geographies <- readRDS(filename)
-  new_geographies <- read.csv(filename)
-} else {
-#df <- select(google_checked_complete,result) 
-df <- filter(google_checked_complete,!str_detect(result,"(?!U\\.K\\.)(.+\\..\\.$)")) %>%
-  mutate(result=str_replace(result," \\'","\\'")) %>%
-  rename(token = result)
-
-df <- separate(df,token,c("A","B","C","D"),sep = " ") %>%
-  pivot_longer(c("A","B","C","D")) %>%
-  mutate(ENTITY = ifelse(name=="A","GPE_B","GPE_I")) %>%
-  filter(!is.na(value)) %>%
-  select(value,ENTITY) %>%
-  rename(token = value)
-
-new_geographies <- unique(right_join(geographies,df)) %>%
-  filter(!is.na(ENTITY)) 
+  new_geographies <- read.csv(filename)} else {
+df <-  mutate(google_checked,placename = token)
+new_geographies <- unique(left_join(df,geographies)) %>%
+  filter(!is.na(entity)) %>%
+  arrange(doc_id,sentence_id,token_id) %>%
+  rename(ENTITY = entity)
 saveRDS(new_geographies,filename)
-write.csv(new_geographies,paste0(filename,'.csv'))
+write.csv(new_geographies,filename)
+}
 return(new_geographies)
 }
+
+geo_filter <- function(google_checked,filters) {
+  gc_uk <- data.frame()
+  gc_nuk <- data.frame()
+  if('gc_uk' %in% filters) {
+gc_uk <- filter(google_checked, str_detect(address...5,', uk|united kingdom'),
+                !str_detect(type,'administrative_area_level_1|airport'),
+                !str_detect(loctype,'rooftop'))
+  }
+  if ('gc_uk' %in% filters) {
+gc_nuk <-filter(google_checked, !str_detect(address...5,', uk|united kingdom'),
+                str_detect(type,'airport|locality|country'))
+  }
+result <- rbind(gc_uk,gc_nuk)
+return(result)
 }
 
 prep_new_parsed_text <- function(new_geographies,parsedtxt,dataset) {
-filename <- paste0(data_dir,"/",dataset,"/",'new_parsed_text.rds')
-if(file.exists(filename)) {
-  new_parsed_text <- readRDS(filename)
-} else {
-  
-new_parsed_text <- left_join(parsedtxt,new_geographies)
+count = 0
+#filename <- paste0(data_dir,"/",dataset,"/",'new_parsed_text.rds')
+#if(file.exists(filename)) {
+#  new_parsed_text <- readRDS(filename)
+#} else {
+
+new_geographies <- select(new_geographies,-pos,-tag,-lemma)
+
+new_parsed_text <- left_join(parsedtxt,new_geographies,
+                             by = c("doc_id", "sentence_id", "token_id", "token"))
 new_parsed_text <- 
   mutate(new_parsed_text,
           tag=ifelse(nchar(tag) < 2, pos, tag),
-          entity=ifelse(str_detect(entity,"GPE") & !entity==ENTITY,ENTITY,entity),
-          entity=ifelse(is.na(entity),"",entity), 
-          tagentity=ifelse(entity == "", tag, entity)) %>%
+          entity=ifelse(str_detect(ENTITY,"GPE"),ENTITY,entity),
+          entity=ifelse(is.na(entity),"",entity),
+          label = ifelse(entity=="","O",entity)) %>% 
+          filter(pos != 'PUNCT') %>%
   select(-ENTITY)
-}
-saveRDS(new_parsed_text,filename)
+
+  found <- google_find(new_parsed_text$result) %>%
+    mutate(found = TRUE) %>%
+    rename(result = 'address...1') %>%
+    select(result,found)
+  
+  
+  
+   new_parsed_text <- left_join(new_parsed_text,found)
+     
+  
+
+#saveRDS(new_parsed_text,filename)
 return(new_parsed_text)
 }
 
 ```
 
------------------------------
-
-
-
+transforms data into sentences, with an equivalent pattern for other meta data such as tags and google check results.
 
 ```{r}
 sentence_representation <- function(df,dataset) {
 filename <- paste0(data_dir,"/",dataset,"/",'sentence_representation.rds')
-if(file.exists(filename)){
-  mylist <- readRDS(filename)
-} else {
-df <-  select(df,doc_id,sentence_id,token,tag,entity,tagentity) %>%
+#if(file.exists(filename)){
+#  mylist <- readRDS(filename)
+#} else {
+df <-  select(df,doc_id,sentence_id,token,pos,tag,entity,label,found) %>%
   mutate(sent_id = as.numeric(paste0(str_extract(doc_id,'[0-9]+'),
                                      as.character(sentence_id)))) %>%
-  select(sent_id,token,tag,entity,tagentity)
+  select(sent_id,token,pos,entity,label,found)
 mylist <- list()
 # note this code could be optimised
 for(line in unique(df$sent_id)) {
   a <- filter(df,sent_id == line)
   if(nrow(a) > 2) {
   sentence <- a$token
-  tagentity <- a$tagentity
-  newline <- list(sentence,tagentity)
+  pos <- a$pos
+  entity <- a$entity
+  label <- a$label
+  found <- a$found
+  #tagentity <- a$tagentity
+  #entityo <- a$entityo
+  newline <- list(sentence,pos,entity,label,found)
   mylist <- append(mylist,list(newline))
   }
 }
-}
+
   saveRDS(mylist,filename)
   return(mylist)
 }
 ```
 
-
-```{r}
-split_data <- function(data_set,dataset,train_model) {
-filename_train <- paste0(data_dir,"/",dataset,"/",'train_data.rds')
-filename_test <- paste0(data_dir,"/",dataset,"/",'test_data.rds')
-len <- length(data_set)
-if(train_model) {
-data_split <- as.integer(length(data_set)*3/4)
-train_data <- data_set[1:data_split]
-test_data <- data_set[data_split:len]
-saveRDS(train_data,paste0(data_dir,filename_train))
-#traintest <- c(train_data,test_data)
-} else {
-test_data <- data_set
-}
-#names(traintest) <- c("train","test")
-saveRDS(test_data,paste0(data_dir,filename_test))
-return()
-}
-```
-
-
------------------------------
+sentence to features process is based on the tutorial python script for sklearn crfsuite, but hugely expanded to include new features, and coded in R.
 
 
 ```{r}
-sent2features <- function(sentence_and_tag) {
+sent2features <- function(sentence_and_tag,word_feat_list) {
+  
+  word_feat_file <- 'townpattern.txt'
+  place_feat <- readLines(word_feat_file)
   
   sentence <- c(sentence_and_tag[[1]])
   sen_tags =  c(sentence_and_tag[[2]])
+  found =  c(sentence_and_tag[[5]])
   features = list()
   count <- 0
   for(word in sentence) {
     wordfeats = list()
     count <- count + 1
+    # Base features
     wordfeats <- append(wordfeats,c('word' = sentence[[count]]))
     wordfeats <- append(wordfeats,c('tag' = sen_tags[[count]]))
-    
+    wordfeats <- append(wordfeats,c('found' = found[[count]]))
+    # Capitalisation
+    wordfeats <- append(wordfeats,(c("Capital" = str_detect(sentence[[count]], "^[:upper:].+$"))))
+    # common place endings
+    # wordfeats <- append(wordfeats,c("Placefeats" =  TRUE %in% str_detect(sentence[[count]],place_feat)))
+    google_checked
+    wordfeats <- append(wordfeats,c('found' = found[[count]]))
     if(count == 1) {
+      # Base features 
       wordfeats <- append(wordfeats,(c("prevWord" = "<S>")))
       wordfeats <- append(wordfeats,(c("prevSecondWord" = "<S>")))
       wordfeats <- append(wordfeats,(c("prevTag" = "<S>")))
       wordfeats <- append(wordfeats,(c("prevSecondTag" = "<S>")))
+      # Capitalisation
+      wordfeats <- append(wordfeats,(c("prevCapital" = "<S>")))
+      wordfeats <- append(wordfeats,(c("prevSecondCapital" = "<S>")))
+      # common place endings
+      #wordfeats <- append(wordfeats,c("prevPlacefeats" =  "<S>"))
+      #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
+      # google_checked
+      wordfeats <- append(wordfeats,c('prevfound' =  "<S>"))
+      wordfeats <- append(wordfeats,c('prevsecondfound' =  "<S>"))
     } else if(count == 2) {
+      # Base features
       wordfeats <- append(wordfeats,c("prevWord" = sentence[[count-1]]))
       wordfeats <- append(wordfeats,c("prevSecondWord" = "</S>"))
       wordfeats <- append(wordfeats,c("prevTag" = sen_tags[[count-1]]))
       wordfeats <- append(wordfeats,c("prevSecondTag" = "</S>"))
+      # Capitalisation
+      wordfeats <- append(wordfeats,(c("prevCapital" = str_detect(sentence[[count-1]], "^[:upper:].+$"))))
+      wordfeats <- append(wordfeats,(c("prevSecondCapital" = "<S>")))
+      # common place endings
+      #wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
+      #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
+      # google_checked
+      wordfeats <- append(wordfeats,c('prevfound' =  found[[count-1]]))
+      wordfeats <- append(wordfeats,c('prevsecondfound' =  "<S>"))
     } else {
+    # Base features
     wordfeats <- append(wordfeats,c("prevWord" = sentence[[count-1]]))
     wordfeats <- append(wordfeats,c("prevSecondWord" = sentence[[count-2]]))
     wordfeats <- append(wordfeats,c("prevTag" = sen_tags[[count-1]]))
     wordfeats <- append(wordfeats,c("prevSecondTag" = sen_tags[[count-2]]))
+    # Capitalisation
+    wordfeats <- append(wordfeats,(c("prevCapital" = str_detect(sentence[[count-1]], "^[:upper:].+$"))))
+    wordfeats <- append(wordfeats,(c("prevSecondCapital" = str_detect(sentence[[count-2]], "^[:upper:].+$"))))
+    # common place endings
+    #wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
+    #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  TRUE %in% str_detect(sentence[[count-2]],place_feat)))
+    # google_checked
+    wordfeats <- append(wordfeats,c('prevfound' =  found[[count-1]]))
+    wordfeats <- append(wordfeats,c('prevsecondfound' =  found[[count-2]]))   
     }
-    
     if(count == length(sentence)) {
+      #Base Features
       wordfeats<- append(wordfeats,c("nextWord" =  "</S>"))
       wordfeats = append(wordfeats,c("nextNextWord" =  "</S>"))
       wordfeats<- append(wordfeats,c("nextTag" =  "</S>"))
       wordfeats = append(wordfeats,c("nextNextTag" =  "</S>"))
+      # Capitalisation
+      wordfeats <- append(wordfeats,(c("nextCapital" = "</S>")))
+      wordfeats <- append(wordfeats,(c("nextSecondCapital" = "</S>")))
+      # common place endings
+      #wordfeats <- append(wordfeats,c("nextPlaceFeats" = "</S>"))
+      #wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" = "</S>"))
+      # google_checked
+      wordfeats <- append(wordfeats,c('nextfound' =  "</S>"))
+      wordfeats <- append(wordfeats,c('nextsecondfound' =  "</S>"))  
     } else if(count == length(sentence)-1) {
+      #Base Features
       wordfeats <- append(wordfeats,c("nextWord" = sentence[[count +1]]))
       wordfeats <- append(wordfeats,c("nextNextWord" ="</S>"))
       wordfeats <- append(wordfeats,c("nextTag" =sen_tags[[count +1]]))
       wordfeats <- append(wordfeats,c("nextNextTag" =  "</S>"))
+      # Capitalisation
+      wordfeats <- append(wordfeats,(c("nextCapital" = str_detect(sentence[[count+1]], "^[:upper:].+$"))))
+      wordfeats <- append(wordfeats,(c("nextSecondCapital" ="</S>")))
+      # common place endings
+      #wordfeats <- append(wordfeats,c("nextPlaceFeats" =  TRUE %in% str_detect(sentence[[count+1]],place_feat)))
+      #wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" = "</S>"))
+       # google_checked
+      wordfeats <- append(wordfeats,c('nextfound' =  found[[count+1]]))
+      wordfeats <- append(wordfeats,c('nextsecondfound' =  "</S>")) 
     } else if(count < length(sentence)-1) {
+      # Base Features
       wordfeats = append(wordfeats,c("nextWord" = sentence[[count+1]]))
       wordfeats  = append(wordfeats,c("nextNextWord" = sentence[[count+2]]))
       wordfeats = append(wordfeats,c("nextTag" = sen_tags[[count+1]]))
       wordfeats  = append(wordfeats,c("nextNexTag" = sen_tags[[count+2]]))
+      # Capitalisation
+      wordfeats <- append(wordfeats,(c("nextCapital" = str_detect(sentence[[count+1]], "^[:upper:].+$"))))
+      wordfeats <- append(wordfeats,(c("nextSecondCapital" = str_detect(sentence[[count+2]], "^[:upper:].+$"))))
+      # common place endings
+      #wordfeats <- append(wordfeats,c("nextPlaceFeats" =  TRUE %in% str_detect(sentence[[count+1]],place_feat)))
+      #wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" =  TRUE %in% str_detect(sentence[[count+2]],place_feat)))
+      # google_checked
+      wordfeats <- append(wordfeats,c('nextfound' =  found[[count+1]]))
+      wordfeats <- append(wordfeats,c('nextsecondfound' = found[[count+2]])) 
     }
         features <- append(features,list(wordfeats))
         feb <- list(features)
@@ -367,6 +410,8 @@ sent2features <- function(sentence_and_tag) {
 }
 
 ```
+
+wrapper function to extract features from multiple sentences.  A for - next loop is used which would be better if replaced by lapply.
 
 ```{r}
 
@@ -378,7 +423,8 @@ get_feats <- function(dta) {
   for(sent in dta) {
     if(length(sent[[1]]) > 2) {
       feats <- append(feats,sent2features(sent))
-      labels <- append(labels,list(sent[[2]]))
+      label <- append(labels,list(sent[[3]]))
+      labels <- append(labels,list(sent[[4]]))
     } else {
      feats <- append(feats,NA)
       labels <- append(labels,NA)
@@ -393,32 +439,48 @@ get_feats <- function(dta) {
 
 ```
 
+A helper fuction that extracts the parts of speach from results
+
+```{r}
+get_pos <- function(a){
+  b <- lapply(a, function(x) x = x[[2]])
+  return(b)
+}
+
+```
 
 
+process results and draw the confusion matrix
 
 ```{r}
 get_full_results <- function(X_dev,Y_dev,y_pred) {
-full_results <- data.frame(cbind(X_dev,Y_dev,y_pred))
+
+pos <- lapply(X_dev, function(x) x = get_pos(x))
+
+full_results <- data.frame(cbind(X_dev,pos,Y_dev,y_pred))
 full_results <- mutate(full_results,comp = as.character(y_pred)==as.character(Y_dev))
 return(full_results)
 }
 
-get_ner_results <- function(full_results,predictions,test) {
+get_ner_results <- function(full_results) {
 predictions <- unlist(full_results$y_pred)
 test <- unlist(full_results$Y_dev)
-ner_results <- data.frame(cbind(test,predictions))
+pos <- unlist(full_results$pos)
+ner_results <- data.frame(cbind(pos,test,predictions))
 ner_results <- mutate(ner_results,comp = as.character(test)==as.character(predictions))
 word_list <- unlist(full_results$X_dev, recursive  = FALSE)
 word_list <- data.frame(unlist(lapply(word_list,function(z) z[1])))
 names(word_list) = c('word')
-ner_results <-cbind(word_list,ner_results)
+ner_results <-cbind(word_list,ner_results) %>%
+  filter(pos == 'PROPN')
 }
 
 evaluate <- function(full_results) {
-
 predictions <- unlist(full_results$y_pred)
 test <- unlist(full_results$Y_dev)
-ner_results <- get_ner_results(full_results,predictions, test)
+ner_results <- get_ner_results(full_results)
+#ner_results <- filter(ner_results,str_detect(test,'GPE')|str_detect(predictions,'GPE'))
+ner_results <- filter(ner_results,test != "O"|predictions !="O")
 summ <- data.frame(table(full_results$comp),row.names = TRUE)
 total_predictions <- sum(summ$Freq)
 correct_predictions <- summ['TRUE',]
@@ -437,9 +499,9 @@ actual_positives <- nrow(filter(ner_results, str_detect(test, "GPE")))
 
 precision <- true_positives / predicted_positives
 recall <- true_positives / actual_positives
-FScore = (2 * precision * recall) / (precision + recall)
+FScore <- (2 * precision * recall) / (precision + recall)
 results <- c(false_positives,false_negatives,true_positives,true_negatives,precision,recall,FScore)
-names(results) <- c('false_positives','false_negatives','true_positives','true_negatives','p#recision','recall','FScore')
+names(results) <- c('false_positives','false_negatives','true_positives','true_negatives','precision','recall','FScore')
 return(results)
 }
 
@@ -448,56 +510,77 @@ TClass <- factor(c(0, 0, 1, 1))
 PClass <- factor(c(0, 1, 0, 1))
 Y      <- c(false_negatives, true_positives, true_negatives, false_positives)
 df <- data.frame(TClass, PClass, Y)
+return(df)
 }
 
-draw_confusion_matrix <- function(df) {
+draw_confusion_matrix <- function(df,dataset,model) {
 pic <- ggplot(data =  df, mapping = aes(x = TClass, y = PClass, label)) +
   geom_tile(aes(fill = c(1,2,3,4)), colour = "white") +
   geom_text(aes(label = sprintf("%1.0f", Y)), vjust = 1) +
-  scale_fill_gradient(low = "green1", high = "green4") +
+  scale_fill_gradient(low = "skyblue", high = "skyblue3") +
+  #scale_fill_distiller() +
   scale_x_discrete(breaks=c("0","1"),
         labels=c("Positive", "Negative")) +
   scale_y_discrete(breaks=c("0","1"),
         labels=c("Negative", "Positive")) +
+  labs(title = paste(dataset,": Model trained on",model), 
+       x = "Actual Results", y = "Predictions") +
   theme_minimal() + theme(legend.position = "none") +
   theme(axis.text.y = element_text(face="bold", color="#993333", 
-                          size=14, angle=90, hjust = 1)) +
+                          size=14, angle=90)) +
   theme(axis.text.x = element_text(face="bold", color="#993333", 
                           size=14)) +
-  theme(axis.title = element_blank()) +
-  theme(axis.ticks = element_blank())
+  theme(axis.ticks = element_blank()) +
+  theme(plot.title = element_text(size = 30),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text.y = element_text(hjust = 0.5))
   ggtitle("Confusion Matrix")
   return(pic)
 }
 
 ```
 
+We now need to prepare the results data by extracting relevant data.  This does require some significan wrangling.
+
+```{r}
+review_results <- function(full_results) {
+  X_dev <- full_results$X_dev
+  X_dev <- lapply(X_dev, function(x) lapply(x, function(y) y[['word']]))
+  training <- lapply(full_results$Y_dev, function(x) as.vector(str_detect(x,"GPE")))
+  predictions <- lapply(full_results$y_pred, function(x) as.vector(str_detect(x,"GPE")))
+  prediction_words <- list()
+  training_words <- list()
+  for(i in 1:length(X_dev)) {
+    xd <- unlist(X_dev[[i]])
+    pw <- predictions[[i]]
+    tw <- training[[i]]
+    px <- as.list(xd[pw])
+    tx <- as.list(xd[tw])
+    prediction_words <- append(prediction_words,list(px))
+    training_words <- append(training_words,list(tx))
+  }
+  z <- as.data.frame(cbind(X_dev,training_words,prediction_words))
+return(z)
+}
+```
+
+This code retrieves the results from Python to allow further manipulation in R.
 
 ```{r}
 get_result_data <- function(dataset) {
-  #X_train_filename <- paste0(data_dir,"/",dataset,"/",'X_train.rds')
-  #Y_train_filename <- paste0(data_dir,"/",dataset,"/",'Y_train.rds')
   X_dev_filename <- paste0(data_dir,"/",dataset,"/",'X_dev.rds')
   Y_dev_filename <- paste0(data_dir,"/",dataset,"/",'Y_dev.rds')
   Y_pred_filename <- paste0(data_dir,"/",dataset,"/",'Y_pred.rds')
-  if(file.exists(Y_pred_filename)) {
-    #X_train <- readRDS(X_train_filename)
-    #Y_train <- readRDS(Y_train_filename)
-    #X_dev <- readRDS(X_dev_filename)
-    #Y_dev <- readRDS(Y_dev_filename)
-    y_pred <- readRDS(Y_pred_filename)
-  } else {
-    #X_train <- py$X_train
-    #Y_train <- py$Y_train
+  #if(file.exists(Y_pred_filename)) {
+  #  y_pred <- readRDS(Y_pred_filename)
+  #} else {
     X_dev <- py$X_dev
     Y_dev <- py$Y_dev
     y_pred <- py$y_pred
-    #saveRDS(X_train,X_train_filename)
-    #saveRDS(Y_train,Y_train_filename)
-    saveRDS(X_dev,X_dev_filename)
-    saveRDS(Y_dev,Y_dev_filename)
-    saveRDS(y_pred,Y_pred_filename)
-  }
+    #saveRDS(X_dev,X_dev_filename)
+    #saveRDS(Y_dev,Y_dev_filename)
+    #saveRDS(y_pred,Y_pred_filename)
   saved_data <- list(X_dev,Y_dev,y_pred)
   names(saved_data) <- c('X_dev','Y_dev','y_pred')
   return(saved_data)
@@ -515,71 +598,108 @@ saveRDS(pic,paste0(data_dir,'/',dataset,"/",'confusion_plot.rds'))
 }
 ```
 
-```{python}
-#wget https://data.deepai.org/conll2003.zip
-def prep_python_env():
-  data_dir = r.data_dir
-  dataset = r.dataset
-  model = r.model
-  train_model = r.train_model
-  from nltk.tag import pos_tag
-  from sklearn.metrics import make_scorer,confusion_matrix
-  from pprint import pprint
-  from sklearn.metrics import f1_score,classification_report
-  from sklearn.pipeline import Pipeline
-  from sklearn_crfsuite import CRF, metrics
-  import string
-  import nltk
-  #nltk.download('averaged_perceptron_tagger')
-  X_train_file = data_dir + '/' + dataset + '/' + 'X_train.obj'
-  Y_train_file = data_dir + '/' + dataset +  '/' + 'Y_train.obj'
-  X_dev_file = data_dir + '/' + dataset + '/' + 'X_dev.obj'
-  Y_dev_file = data_dir + '/' + dataset + '/' + 'Y_dev.obj'
-  model_file = data_dir + '/' + model + '/' + 'crfmodel.obj'
-  exists = os.path.isfile(X_dev_file)
-  if exists and train_model:
-    print("loading from disk")
-    with open(X_train_file, 'rb') as X_train_f:
-      X_train = pickle.load(X_train_f)
-    with open(Y_train_file, 'rb') as Y_train_f:
-      Y_train = pickle.load(Y_train_f)
-    with open(X_dev_file, 'rb') as X_dev_f:
-      X_dev = pickle.load(X_dev_f)
-    with open(Y_dev_file, 'rb') as Y_dev_f:
-      Y_dev = pickle.load(Y_dev_f)      
-  elif exists:
-    with open(X_dev_file, 'rb') as X_dev_f:
-      X_dev = pickle.load(X_dev_f)
-    with open(Y_dev_file, 'rb') as Y_dev_f:
-      Y_dev = pickle.load(Y_dev_f)
-    X_train = None
-    Y_train = None
-  else:
-    X_train = r.X_train
-    Y_train = r.Y_train
-    Y_dev = r.Y_dev
-    X_dev = r.X_dev
-  with open(X_train_file, 'wb') as X_train_f:
-    pickle.dump(X_train, X_train_f)
-  with open(Y_train_file, 'wb') as Y_train_f:
-    pickle.dump(Y_train, Y_train_f) 
-  with open(X_dev_file, 'wb') as X_dev_f:
-    pickle.dump(X_dev, X_dev_f) 
-  with open(Y_dev_file, 'wb') as Y_dev_f:
-    pickle.dump(Y_dev, Y_dev_f)
-  return X_train, Y_train, X_dev, Y_dev, train_model, model_file
+
+```{r}
+prep_new_data <- function(locations) {
+  locations <- unique(locations)
+  locations <- as.data.frame(locations)
+  #local <- slice_sample(local,n=10)
+  names(locations) <- 'address'
+  return(locations)
+}
+
+get_google_data <- function(local) {
+  local <- data.frame(local)
+  names(local) <- "address"
+  local <- mutate(local,address = ifelse(is.na(address),"",address))
+  if(!is.null(nrow(local))) {
+  df <- mutate_geocode(local, address, output = 'more')
+  return(df)
+  }
+}
+
+make_all_data <- function() {
+  a <- data.frame(address = character(1))
+  a <- mutate_geocode(a, address, output = 'more')[-1,]
+  return(a)
+}
+
+check_new_data <- function(new_data,all_places) {
+  results <- !(lapply(new_data[[1]], tolower) %in% lapply(all_places$address...1, tolower))
+  return(new_data$address[results])
+}
+
+check_existing_data <- function(new_data,all_places) {
+  results <- (lapply(new_data[[1]], tolower) %in% lapply(all_places$address...1, tolower))
+  return(new_data$address[results])
+}
+
+save_places <- function(all_places) {
+  saveRDS(all_places,paste0(data_dir,'google_db.rds'))
+}
+
+
+extract_data <- function(all_new_places,all_places) {
+  results <- (lapply(all_places$address...1, tolower) %in% lapply(all_new_places, tolower))
+  return(unique(all_places[results,]))
+}
+
+google_find <- function(locations) {
+all_places <- readRDS(paste0(data_dir,'google_db.rds'))
+all_places <- mutate(all_places, address...1 = ifelse(is.na(address...1),"",address...1))
+new_data <- prep_new_data(locations)
+additional_locations <- data.frame()
+existing_places <- check_existing_data(new_data,all_places)
+additional_places <- check_new_data(new_data,all_places)
+if(length(additional_places) != 0) {
+   if(!is.na(additional_places)) {
+additional_locations <- get_google_data(additional_places)
+}
+}
+if('address...6' %in% colnames(additional_locations)) {
+  additional_locations <- rename(additional_locations, address...5 = 'address...6')
+}
+all_places <- rbind(all_places, additional_locations)
+save_places(all_places)
+all_new_places <- c(existing_places,additional_places)
+results <- extract_data(all_new_places,all_places)
+return(results)
+}
+
+
 ```
 
+
+New code for training, using kfold cross validation, but the evaluation data is still based on 3/4 split of data.  This should be updated when I get a chance.
+
 ```{python}
-#Train a sequence model
-def train_seq(X_train,Y_train,X_dev,Y_dev):
-  crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
-  crf.fit(X_train, Y_train)
-  labels = list(crf.classes_)
+def train(data_set,dataset,data_dir,splits):
+  model_file = data_dir + '/' + dataset + '/' + 'crfmodel.obj'
+  exists = os.path.isfile(model_file)
+  X = np.array(data_set[0], dtype=object)
+  Y = np.array(data_set[1], dtype=object)
+  if exists:
+    with open(model_file, 'rb') as model_f:
+      crf = pickle.load(model_f)
+  else:  
+    crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=100)
+    kf = KFold(n_splits=splits)
+    kf.get_n_splits(X)
+    print(kf)
+    for train_index, test_index in kf.split(X):
+      print("TRAIN:", train_index, "TEST:", test_index)
+      X_train, X_test = X[train_index], X[test_index]
+      y_train, y_test = Y[train_index], Y[test_index]
+      crf.fit(X_train, y_train)
+      #rint("Accuracy for the fold: on the test set: {accuracy_score(y_test, model.predict(X_test))}")
+  data_end = np.shape(Y)[0]
+  split_rows = int(data_end * 3/4)
+  X_dev = X[split_rows:data_end]
+  Y_dev = Y[split_rows:data_end]
   y_pred = crf.predict(X_dev)
-  crfmodel = data_dir + '/' + dataset + '/' + 'crfmodel.obj'
-  with open(crfmodel, 'wb') as output:  # Overwrites any existing file.
-        pickle.dump(crf, output)
+  with open(model_file, 'wb') as output:  # Overwrites any existing file.
+    pickle.dump(crf, output)
+  return(X_dev,Y_dev,y_pred)
 ```
 
 
@@ -587,5 +707,4 @@ def train_seq(X_train,Y_train,X_dev,Y_dev):
 
 
 
-`
 

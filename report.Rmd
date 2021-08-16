@@ -1,6 +1,6 @@
 ---
 title: "Report"
-output: html_document
+output:html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -16,9 +16,10 @@ library(stringr)
 library(stringi)
 library(ggplot2)
 library(pkgcond)
+library(data.table)
 library(kableExtra)
 data_dir <- "../Data/"
-dataset <- 'AF62'
+dataset <- 'GD45'
 myresults_file <- paste0(data_dir,'/',dataset,'/','myresults.rds')
 results <- as.data.frame(readRDS(paste0(data_dir,'/',dataset,'/','results.rds')))
 names(results) = "Results"
@@ -28,7 +29,7 @@ placenames <- readRDS(paste0(data_dir,'/',dataset,'/','placenames.rds'))
 interesting_data <- readRDS(paste0(data_dir,'/',dataset,'/','interesting_data.rds'))
 text <- interesting_data[['text']]
 
-get_full_placenames <- function(interesting_data, placenames) {
+get_full_placenames <- function(placenames) {
 
 pred1 <- placenames[-1,] %>% select(word,predictions)
 pred1[nrow(pred1)+1,] <- NA
@@ -46,49 +47,61 @@ full_placenames <- unique(unique(cbind(placenames,pred1,pred2,pred3)) %>%
          name = ifelse(pred1 == "GPE_I" & pred2 == "GPE_I",paste(word,word1,word2),name),
          name = ifelse(pred1 == "GPE_I" & pred2 == "GPE_I" & pred3 == "GPE_I", paste(word,word1,word2,word3),name)) %>%
   select(name))
-full_placenames <- mutate(full_placenames,tname = paste0('\\b',name,'\\b'))
-a <- as.character(full_placenames$tname)
+full_placenames <- mutate(full_placenames,tname = paste0('\\W',name,'\\W'),
+                          no_of_words = sapply(strsplit(name, " "), length),
+                          no_of_characters = nchar(name)) %>%
+                          arrange(desc(no_of_words),desc(no_of_characters))
+a <- as.character(full_placenames$name)
+a <- as.character(a)
+a <- regex(a, ignore_case = TRUE)
 return(a)
 }
 
+
 clean <- function(value,a) {
-v1 <-  data.frame(str_extract(value,regex(as.list(a), ignore_case = TRUE)))
-names(v1) <- 'locations'
-v1 <- filter(v1,!is.na(locations))
-return(as.vector(v1))
+  b <- str_extract(value,a)
+  b <- b[!is.na(b)]
+  #b <- ifelse(identical(b, character()),"",b)
+  b <- paste(b, collapse = ",")
+  b
+  return(b)
 }
 
-a <- get_full_placenames(interesting_data,placenames)
-
-#if(!file.exists(myresults_file)) {
-myresults <- lapply(text$value, function
-                              (x) clean(x,a))
-myresults <- as.data.frame(cbind(text,as.matrix(myresults)))
+a <- get_full_placenames(placenames)
+myresults <- unlist(lapply(text$value, function(x) clean(x,a)),recursive = FALSE)
+myresults <- as.data.frame(cbind(text,myresults))
 names(myresults) <- c("Ref","Type","Text","Locations")
 saveRDS(myresults, myresults_file)
-#} else {
-#myresults <- readRDS(myresults_file)
-#}
+
 
 ```
 
 ```{r, 'reports', message=FALSE, warning=FALSE, results='asis', echo = FALSE, cache = FALSE}
 #placenames$word
-options(scipen=999)
-results %>%
+Measure <- c("Precision", "Recall", "Fscore")
+
+results_print <- tail(results,3)
+results_print <- lapply(results_print,function(x) as.character(round(x, digits=3)))
+results_print <- data.frame(results_print)
+results_print <- setDT(results_print, keep.rownames = FALSE)
+#results_print <- transpose(results_print) 
+names(results_print) <- "Value"
+results_print <- cbind(Measure,results_print) %>% select(Measure, Value)
+results_print %>%
   kbl() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
-  row_spec(1:nrow(results),color='black')
+  row_spec(1:nrow(results_print),color='black') %>%
+  column_spec(1,width = "4cm") 
 confusion_plot
 #knitr::kable(tester, caption = dataset)
 
 
-#display <- slice(myresults,1:20)
-display <- myresults
+display <- slice(myresults,1:20)
+#display <- myresults
 display %>%
   kbl() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
-  row_spec(1:nrow(display),color='black') %>%
+ # kable_styling(bootstrap_options = c("striped")) %>%
+#  row_spec(1:nrow(display),color='black') %>%
   column_spec(1,width = "1cm") %>%
   column_spec(2,width = "1cm") %>%
   column_spec(3,width = "5cm") %>%

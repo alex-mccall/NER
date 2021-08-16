@@ -3,12 +3,21 @@ title: "R Notebook"
 output: html_notebook
 ---
 
+This first block sets up the R environment.  It also allows us to seperate the training data set from the data set the model will be applied to.  If the dataset and model are different, then an existing model will be taken from disk and applied to the dataset, otherwise, it will go through a training process to train the model.
+
+intersting data should be better described as various views of the text that has been parsed and tagged by spacyr.
+
+Google is referenced two times, first where the UK is added to the query string to bias the responses towards UK ones, and secondly the remaining candidates presented as they are.
+
+The resulting data is filtered for some non-geoggraphical initials
 
 ```{r message = FALSE, warning=FALSE}
 prep_r_env()
 dataset <- 'GD45'
 model <- 'AF62'
 data_dir <- "../Data/"
+key <- readRDS(paste0(data_dir,"google-key"))
+register_google(key = key)
 
 train_path <-  paste0(data_dir,"/",dataset,"/",'train_data.rds')
 test_path <-  paste0(data_dir,"/",dataset,"/",'test_data.rds')
@@ -18,40 +27,37 @@ train_model <- !file.exists(model_path)
 
 interesting_data <- get_text(dataset)
 
-google_checked <- ask_google(interesting_data[['locations']],dataset = dataset)
-google_checked_complete <- get_google_checked_complete(google_checked, 
-                                                  interesting_data[['parsedtxt']],
-                                                       dataset)
+google_checked <- ask_google(interesting_data[['locations']],dataset)
 
-new_geographies <- prep_new_geographies(google_checked_complete,
-                                        interesting_data[['geographies']],
+google_checked <- geo_filter(google_checked, c('gc_uk','gc_nuk'))
+
+google_checked <- mutate(google_checked, entity = str_replace(entity,'[A-Z]+_B','GPE_B'),
+             entity = str_replace(entity,'[A-Z]+_I','GPE_I'))
+
+new_geographies <- prep_new_geographies(google_checked,
+                                        interesting_data[['proper_noun']],
                                         dataset)
 ```
 
-At this point, the data should be checked
+At this point, the data should be checked by hand.  The more detailed this check, the better.  The idea is that some of this checking has been done in this 'semi-supervised' system.
+
+
+new_parsed_text then processes the data such that all identified geopgraphical entities are labelled correctly in a format that can be used to prepare for sklearn.  Additional information is added by checking with google.  This informtaion will be used later as a feature for the CRF algorithm.
+
+The data is first transformed into lists of sentences and their related tags, and then transformed to a full feature dataset based on the feature engineering rules that have been defined.
 
 ```{r}
+
+
 new_parsed_text <- prep_new_parsed_text(new_geographies,
                                         interesting_data[['parsedtxt']],
                                         dataset)
+
 data_set <- sentence_representation(new_parsed_text,dataset)
-
-
-split_data(data_set,dataset,train_model)
-
-test = readRDS(test_path)
-if(train_model) {
-train = readRDS(train_path)
-training_data <- get_feats(train)
-X_train <- training_data[[1]]
-Y_train <- as.list(training_data[[2]])
-#devfeats, devlabels = get_feats_conll(conll_dev)
-}
-testing_data <- get_feats(test)
-X_dev  <- testing_data[[1]]
-Y_dev <- testing_data[[2]]
-
+ds <-get_feats(data_set)
 ```
+
+The following python script  first sets up the python environment, and then imports the data that has been prepared in R. The CRF algorithm is then trained and the resulting training and test data sets are retured, in order that an evaluation of the success of the algorithm can be given.
 
 ```{python}
 import pickle
@@ -64,50 +70,56 @@ from sklearn.pipeline import Pipeline
 from sklearn_crfsuite import CRF, metrics
 import string
 import nltk
+import numpy as np
+from sklearn.model_selection import KFold
 
-nltk.download('averaged_perceptron_tagger')
-X_train,Y_train,X_dev, Y_dev, train_model,model_file = prep_python_env()
-if train_model: 
-  crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=50)
-  #Just to fit on training data
-  crf.fit(X_train, Y_train)
-  #labels = list(crf.classes_)
-else:
-  with open(model_file, 'rb') as model_f:
-      crf = pickle.load(model_f)
+#nltk.download('averaged_perceptron_tagger')
+#data_dir,dataset,model,train_model = prep_python_env()
+#X_train,Y_train,X_dev, Y_dev, train_model,model_file, y_pred = prep_data_single(data_dir,dataset,model,train_model)
+dataset = r.dataset
+data_set = r.ds
+data_dir = r.data_dir
+kfolds = 10
+X_dev,Y_dev,y_pred = train(data_set,dataset,data_dir,kfolds)
 
 
-y_pred = crf.predict(X_dev)
 ```
+
+The data is fed bac into R and transformed once again in order to produce a set of metrics (stored in 'results').  A confusion matrix is also calculated and plotted, using ggplot, but the output is stored, and the plot not yet printed.
+
+ner_results gives a summary of the named entities either specified in the training data or predicted. 
+
+results_in_context gives the data in a forn that can be used to present back to subject matter experts
 
 
 ```{r}
 library(reticulate)
 saved_data <- get_result_data(dataset)
-#X_train <- saved_data[['X_train']]
-#Y_train <- saved_data[['Y_train']]
 X_dev <- saved_data[['X_dev']]
 Y_dev <- saved_data[['Y_dev']]
 y_pred <- saved_data[['y_pred']]
 
 full_results <- get_full_results(X_dev,Y_dev,y_pred)
 
-predictions <- full_results$y_pred
-#test <- unlist(full_results$Y_dev)
+#predictions <- full_results$y_pred
 
-ner_results <-get_ner_results(full_results,predictions,test)
+ner_results <-get_ner_results(full_results)
 results <- evaluate(full_results)
 confusion_matrix <- get_confusion_matrix(results['false_negatives'], results['true_positives'], results['true_negatives'], results['false_positives'])
 placenames <- unique(filter(ner_results,str_starts(predictions,"GPE"),
                             comp == TRUE))
-pic <- draw_confusion_matrix(confusion_matrix)
-
+pic <- draw_confusion_matrix(confusion_matrix,dataset,model)
 ner_results <- mutate(ner_results,highlights = ifelse(comp,ifelse(str_starts(predictions,"GPE"),paste0("++",word,"++"),word)
                                                       ,paste0("***",word,"***")))
 
 prose <- paste(ner_results$highlights, collapse=' ', sep="")
 
 save_results(results,prose,ner_results,confusion_matrix,placenames,pic,dataset)
+
+results_in_context <-review_results(full_results) %>%
+  filter(length(training_words) != 0)
+
+#b <- mutate(a, len = paste(training_words, sep = " ", collapse = " "))
 
 ```
 
