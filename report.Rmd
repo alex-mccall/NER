@@ -19,7 +19,7 @@ library(pkgcond)
 library(data.table)
 library(kableExtra)
 data_dir <- "../Data/"
-dataset <- 'AF62'
+dataset <- 'GD45'
 myresults_file <- paste0(data_dir,'/',dataset,'/','myresults.rds')
 results <- as.data.frame(readRDS(paste0(data_dir,'/',dataset,'/','results.rds')))
 names(results) = "Results"

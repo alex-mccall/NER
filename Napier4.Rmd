@@ -162,7 +162,8 @@ geographies <- filter(parsedtxt,str_detect(entity,"GPE"))
 organisations <- filter(parsedtxt,str_detect(entity,"ORG"))
 persons <- filter(parsedtxt,str_detect(entity,"PERSON"))
 noun <- filter(parsedtxt,str_detect(pos,"NOUN"))
-proper_noun <- filter(parsedtxt,str_detect(pos,"PROPN"))
+proper_noun <- filter(parsedtxt,str_detect(pos,"PROPN")) %>%
+               mutate(entity = ifelse(entity == "","GPE_B",entity))
 
 p <- group_by(nounphrases,doc_id) %>%
   summarise(all = paste(text, collapse = " "))
@@ -181,16 +182,11 @@ return(interesting_data)
 Use the locations that have been checked by Google to replace annotations to the text
 
 ```{r}
-prep_new_geographies <- function(google_checked_complete,geographies,dataset) {
+prep_new_geographies <- function(google_checked,geographies,dataset) {
 filename <- paste0(data_dir,"/",dataset,"/",'new_geographies.rds.csv')
 if(file.exists(filename)) {
-  #new_geographies <- readRDS(filename)
   new_geographies <- read.csv(filename)} else {
-#df <- select(google_checked_complete,result) 
-df <- filter(google_checked_complete,!str_detect(token,"(?!U\\.K\\.)(.+\\..\\.$)")) %>%
-  mutate(token=str_replace(token," \\'","\\'"),
-         placename = token) 
-
+df <-  mutate(google_checked,placename = token)
 new_geographies <- unique(left_join(df,geographies)) %>%
   filter(!is.na(entity)) %>%
   arrange(doc_id,sentence_id,token_id) %>%
@@ -201,10 +197,25 @@ write.csv(new_geographies,filename)
 return(new_geographies)
 }
 
+geo_filter <- function(google_checked,filters) {
+  gc_uk <- data.frame()
+  gc_nuk <- data.frame()
+  if('gc_uk' %in% filters) {
+gc_uk <- filter(google_checked, str_detect(address...5,', uk|united kingdom'),
+                !str_detect(type,'administrative_area_level_1|airport'),
+                !str_detect(loctype,'rooftop'))
+  }
+  if ('gc_uk' %in% filters) {
+gc_nuk <-filter(google_checked, !str_detect(address...5,', uk|united kingdom'),
+                str_detect(type,'airport|locality|country'))
+  }
+result <- rbind(gc_uk,gc_nuk)
+return(result)
+}
 
 prep_new_parsed_text <- function(new_geographies,parsedtxt,dataset) {
 count = 0
-filename <- paste0(data_dir,"/",dataset,"/",'new_parsed_text.rds')
+#filename <- paste0(data_dir,"/",dataset,"/",'new_parsed_text.rds')
 #if(file.exists(filename)) {
 #  new_parsed_text <- readRDS(filename)
 #} else {
@@ -219,24 +230,21 @@ new_parsed_text <-
           entity=ifelse(str_detect(ENTITY,"GPE"),ENTITY,entity),
           entity=ifelse(is.na(entity),"",entity),
           label = ifelse(entity=="","O",entity)) %>% 
-   #       tagentity=ifelse(entity == "", tag, entity)) %>%
-   #       entityo=ifelse(str_detect(tagentity,"GPE"),tagentity,"O")) %>%
           filter(pos != 'PUNCT') %>%
   select(-ENTITY)
-  #found <- lapply(new_parsed_text$result, function(x)
-  #                is_place(x))
-  #found <- t(as.data.frame(found))
+
   found <- google_find(new_parsed_text$result) %>%
     mutate(found = TRUE) %>%
     rename(result = 'address...1') %>%
     select(result,found)
   
   
+  
    new_parsed_text <- left_join(new_parsed_text,found)
      
   
 
-saveRDS(new_parsed_text,filename)
+#saveRDS(new_parsed_text,filename)
 return(new_parsed_text)
 }
 
@@ -300,8 +308,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
     # Capitalisation
     wordfeats <- append(wordfeats,(c("Capital" = str_detect(sentence[[count]], "^[:upper:].+$"))))
     # common place endings
-    wordfeats <- append(wordfeats,c("Placefeats" =  TRUE %in% str_detect(sentence[[count]],place_feat)))
-    # google_checked
+    # wordfeats <- append(wordfeats,c("Placefeats" =  TRUE %in% str_detect(sentence[[count]],place_feat)))
+    google_checked
     wordfeats <- append(wordfeats,c('found' = found[[count]]))
     if(count == 1) {
       # Base features 
@@ -313,8 +321,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
       wordfeats <- append(wordfeats,(c("prevCapital" = "<S>")))
       wordfeats <- append(wordfeats,(c("prevSecondCapital" = "<S>")))
       # common place endings
-      wordfeats <- append(wordfeats,c("prevPlacefeats" =  "<S>"))
-      wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
+      #wordfeats <- append(wordfeats,c("prevPlacefeats" =  "<S>"))
+      #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
       # google_checked
       wordfeats <- append(wordfeats,c('prevfound' =  "<S>"))
       wordfeats <- append(wordfeats,c('prevsecondfound' =  "<S>"))
@@ -328,8 +336,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
       wordfeats <- append(wordfeats,(c("prevCapital" = str_detect(sentence[[count-1]], "^[:upper:].+$"))))
       wordfeats <- append(wordfeats,(c("prevSecondCapital" = "<S>")))
       # common place endings
-      wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
-      wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
+      #wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
+      #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
       # google_checked
       wordfeats <- append(wordfeats,c('prevfound' =  found[[count-1]]))
       wordfeats <- append(wordfeats,c('prevsecondfound' =  "<S>"))
@@ -343,8 +351,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
     wordfeats <- append(wordfeats,(c("prevCapital" = str_detect(sentence[[count-1]], "^[:upper:].+$"))))
     wordfeats <- append(wordfeats,(c("prevSecondCapital" = str_detect(sentence[[count-2]], "^[:upper:].+$"))))
     # common place endings
-    wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
-    wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  TRUE %in% str_detect(sentence[[count-2]],place_feat)))
+    #wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
+    #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  TRUE %in% str_detect(sentence[[count-2]],place_feat)))
     # google_checked
     wordfeats <- append(wordfeats,c('prevfound' =  found[[count-1]]))
     wordfeats <- append(wordfeats,c('prevsecondfound' =  found[[count-2]]))   
@@ -359,8 +367,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
       wordfeats <- append(wordfeats,(c("nextCapital" = "</S>")))
       wordfeats <- append(wordfeats,(c("nextSecondCapital" = "</S>")))
       # common place endings
-      wordfeats <- append(wordfeats,c("nextPlaceFeats" = "</S>"))
-      wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" = "</S>"))
+      #wordfeats <- append(wordfeats,c("nextPlaceFeats" = "</S>"))
+      #wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" = "</S>"))
       # google_checked
       wordfeats <- append(wordfeats,c('nextfound' =  "</S>"))
       wordfeats <- append(wordfeats,c('nextsecondfound' =  "</S>"))  
@@ -374,8 +382,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
       wordfeats <- append(wordfeats,(c("nextCapital" = str_detect(sentence[[count+1]], "^[:upper:].+$"))))
       wordfeats <- append(wordfeats,(c("nextSecondCapital" ="</S>")))
       # common place endings
-      wordfeats <- append(wordfeats,c("nextPlaceFeats" =  TRUE %in% str_detect(sentence[[count+1]],place_feat)))
-      wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" = "</S>"))
+      #wordfeats <- append(wordfeats,c("nextPlaceFeats" =  TRUE %in% str_detect(sentence[[count+1]],place_feat)))
+      #wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" = "</S>"))
        # google_checked
       wordfeats <- append(wordfeats,c('nextfound' =  found[[count+1]]))
       wordfeats <- append(wordfeats,c('nextsecondfound' =  "</S>")) 
@@ -389,8 +397,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
       wordfeats <- append(wordfeats,(c("nextCapital" = str_detect(sentence[[count+1]], "^[:upper:].+$"))))
       wordfeats <- append(wordfeats,(c("nextSecondCapital" = str_detect(sentence[[count+2]], "^[:upper:].+$"))))
       # common place endings
-      wordfeats <- append(wordfeats,c("nextPlaceFeats" =  TRUE %in% str_detect(sentence[[count+1]],place_feat)))
-      wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" =  TRUE %in% str_detect(sentence[[count+2]],place_feat)))
+      #wordfeats <- append(wordfeats,c("nextPlaceFeats" =  TRUE %in% str_detect(sentence[[count+1]],place_feat)))
+      #wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" =  TRUE %in% str_detect(sentence[[count+2]],place_feat)))
       # google_checked
       wordfeats <- append(wordfeats,c('nextfound' =  found[[count+1]]))
       wordfeats <- append(wordfeats,c('nextsecondfound' = found[[count+2]])) 
@@ -564,16 +572,15 @@ get_result_data <- function(dataset) {
   X_dev_filename <- paste0(data_dir,"/",dataset,"/",'X_dev.rds')
   Y_dev_filename <- paste0(data_dir,"/",dataset,"/",'Y_dev.rds')
   Y_pred_filename <- paste0(data_dir,"/",dataset,"/",'Y_pred.rds')
-  if(file.exists(Y_pred_filename)) {
-    y_pred <- readRDS(Y_pred_filename)
-  } else {
+  #if(file.exists(Y_pred_filename)) {
+  #  y_pred <- readRDS(Y_pred_filename)
+  #} else {
     X_dev <- py$X_dev
     Y_dev <- py$Y_dev
     y_pred <- py$y_pred
-    saveRDS(X_dev,X_dev_filename)
-    saveRDS(Y_dev,Y_dev_filename)
-    saveRDS(y_pred,Y_pred_filename)
-  }
+    #saveRDS(X_dev,X_dev_filename)
+    #saveRDS(Y_dev,Y_dev_filename)
+    #saveRDS(y_pred,Y_pred_filename)
   saved_data <- list(X_dev,Y_dev,y_pred)
   names(saved_data) <- c('X_dev','Y_dev','y_pred')
   return(saved_data)
@@ -609,10 +616,6 @@ get_google_data <- function(local) {
   df <- mutate_geocode(local, address, output = 'more')
   return(df)
   }
-}
-
-add_data <- function(latest,allplaces) {
-  rbind(allplaces,latest)
 }
 
 make_all_data <- function() {
@@ -652,6 +655,9 @@ if(length(additional_places) != 0) {
    if(!is.na(additional_places)) {
 additional_locations <- get_google_data(additional_places)
 }
+}
+if('address...6' %in% colnames(additional_locations)) {
+  additional_locations <- rename(additional_locations, address...5 = 'address...6')
 }
 all_places <- rbind(all_places, additional_locations)
 save_places(all_places)

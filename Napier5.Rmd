@@ -13,7 +13,7 @@ The resulting data is filtered for some non-geoggraphical initials
 
 ```{r message = FALSE, warning=FALSE}
 prep_r_env()
-dataset <- 'AF62'
+dataset <- 'GD45'
 model <- 'AF62'
 data_dir <- "../Data/"
 key <- readRDS(paste0(data_dir,"google-key"))
@@ -25,15 +25,16 @@ full_test_path <-  paste0(data_dir,"/",dataset,"/",'full_test_data.rds')
 model_path <- paste0(data_dir,"/",model,"/",'crfmodel.obj')
 train_model <- !file.exists(model_path)
 
-
 interesting_data <- get_text(dataset)
 
 google_checked <- ask_google(interesting_data[['locations']],dataset)
-#google_checked_complete <- get_google_checked_complete(google_checked, 
-#                                                  interesting_data[['parsedtxt']],
-#                                                       dataset)
 
-new_geographies <- prep_new_geographies(google_checked_complete,
+google_checked <- geo_filter(google_checked, c('gc_uk','gc_nuk'))
+
+google_checked <- mutate(google_checked, entity = str_replace(entity,'[A-Z]+_B','GPE_B'),
+             entity = str_replace(entity,'[A-Z]+_I','GPE_I'))
+
+new_geographies <- prep_new_geographies(google_checked,
                                         interesting_data[['proper_noun']],
                                         dataset)
 ```
@@ -78,7 +79,7 @@ from sklearn.model_selection import KFold
 dataset = r.dataset
 data_set = r.ds
 data_dir = r.data_dir
-kfolds = 5
+kfolds = 10
 X_dev,Y_dev,y_pred = train(data_set,dataset,data_dir,kfolds)
 
 
