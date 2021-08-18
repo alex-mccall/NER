@@ -4,7 +4,8 @@
 This work demonstates the use of a CRF machine learning algorithm on real world Data provided by the National Records of Scotland.  
 The code is predominently in R, but the learning aspect has been coded in Python using the CRFSuite of SKlearn.
 
-Napier4 contains the required functions.  'Run all code' chunks before running the code in Napier5
+Napier4 contains the required functions.  'Run all code' chunks before running the code in Napier5.
+
 Napier5 contains the control code.  Recommended to run one chunk at a time.
 
 ##Environment requirements:
