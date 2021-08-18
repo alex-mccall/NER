@@ -8,12 +8,12 @@ Napier4 contains the required functions.  'Run all code' chunks before running t
 
 Napier5 contains the control code.  Recommended to run one chunk at a time.
 
-##Environment requirements:
+## Environment requirements:
 
-###RStudio
+### RStudio
 Conda Python (expected virtual environment is called 'NER'
 
-###R Libraries
+### R Libraries
 tidyr
 xml2
 dplyr
@@ -24,7 +24,7 @@ spacyr
 editData
 reticulate
 
-###Python Libraries
+### Python Libraries
 import pickle
 import os.path
 from nltk.tag import pos_tag
@@ -38,10 +38,10 @@ import nltk
 import numpy as np
 from sklearn.model_selection import KFold
 
-###Data directory
+### Data directory
 PATH:  ..Data/
 
-###Minimum Data directory contents:
+### Minimum Data directory contents:
 
   Geoparser (directory containing XML source data)
   townpattern.txt (file containing common town name parts such as 'bourgh', 'field' etc)
