@@ -290,7 +290,7 @@ sentence to features process is based on the tutorial python script for sklearn 
 ```{r}
 sent2features <- function(sentence_and_tag,word_feat_list) {
   
-  word_feat_file <- 'townpattern.txt'
+  word_feat_file <- paste0(data_dir, 'townpattern.txt')
   place_feat <- readLines(word_feat_file)
   
   sentence <- c(sentence_and_tag[[1]])
@@ -308,7 +308,7 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
     # Capitalisation
     wordfeats <- append(wordfeats,(c("Capital" = str_detect(sentence[[count]], "^[:upper:].+$"))))
     # common place endings
-    # wordfeats <- append(wordfeats,c("Placefeats" =  TRUE %in% str_detect(sentence[[count]],place_feat)))
+    wordfeats <- append(wordfeats,c("Placefeats" =  TRUE %in% str_detect(sentence[[count]],place_feat)))
     google_checked
     wordfeats <- append(wordfeats,c('found' = found[[count]]))
     if(count == 1) {
@@ -321,8 +321,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
       wordfeats <- append(wordfeats,(c("prevCapital" = "<S>")))
       wordfeats <- append(wordfeats,(c("prevSecondCapital" = "<S>")))
       # common place endings
-      #wordfeats <- append(wordfeats,c("prevPlacefeats" =  "<S>"))
-      #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
+      wordfeats <- append(wordfeats,c("prevPlacefeats" =  "<S>"))
+      wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
       # google_checked
       wordfeats <- append(wordfeats,c('prevfound' =  "<S>"))
       wordfeats <- append(wordfeats,c('prevsecondfound' =  "<S>"))
@@ -336,8 +336,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
       wordfeats <- append(wordfeats,(c("prevCapital" = str_detect(sentence[[count-1]], "^[:upper:].+$"))))
       wordfeats <- append(wordfeats,(c("prevSecondCapital" = "<S>")))
       # common place endings
-      #wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
-      #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
+      wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
+      wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  "<S>"))
       # google_checked
       wordfeats <- append(wordfeats,c('prevfound' =  found[[count-1]]))
       wordfeats <- append(wordfeats,c('prevsecondfound' =  "<S>"))
@@ -351,8 +351,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
     wordfeats <- append(wordfeats,(c("prevCapital" = str_detect(sentence[[count-1]], "^[:upper:].+$"))))
     wordfeats <- append(wordfeats,(c("prevSecondCapital" = str_detect(sentence[[count-2]], "^[:upper:].+$"))))
     # common place endings
-    #wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
-    #wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  TRUE %in% str_detect(sentence[[count-2]],place_feat)))
+    wordfeats <- append(wordfeats,c("prevPlacefeats" =  TRUE %in% str_detect(sentence[[count-1]],place_feat)))
+    wordfeats <- append(wordfeats,c("prevSecondPlacefeats" =  TRUE %in% str_detect(sentence[[count-2]],place_feat)))
     # google_checked
     wordfeats <- append(wordfeats,c('prevfound' =  found[[count-1]]))
     wordfeats <- append(wordfeats,c('prevsecondfound' =  found[[count-2]]))   
@@ -367,8 +367,8 @@ sent2features <- function(sentence_and_tag,word_feat_list) {
       wordfeats <- append(wordfeats,(c("nextCapital" = "</S>")))
       wordfeats <- append(wordfeats,(c("nextSecondCapital" = "</S>")))
       # common place endings
-      #wordfeats <- append(wordfeats,c("nextPlaceFeats" = "</S>"))
-      #wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" = "</S>"))
+      wordfeats <- append(wordfeats,c("nextPlaceFeats" = "</S>"))
+      wordfeats <- append(wordfeats,c("nextSecondPlaceFeats" = "</S>"))
       # google_checked
       wordfeats <- append(wordfeats,c('nextfound' =  "</S>"))
       wordfeats <- append(wordfeats,c('nextsecondfound' =  "</S>"))  
@@ -651,10 +651,8 @@ new_data <- prep_new_data(locations)
 additional_locations <- data.frame()
 existing_places <- check_existing_data(new_data,all_places)
 additional_places <- check_new_data(new_data,all_places)
-if(length(additional_places) != 0) {
-   if(!is.na(additional_places)) {
-additional_locations <- get_google_data(additional_places)
-}
+if(length(additional_places) > 1) {
+  additional_locations <- get_google_data(additional_places)
 }
 if('address...6' %in% colnames(additional_locations)) {
   additional_locations <- rename(additional_locations, address...5 = 'address...6')
@@ -682,16 +680,16 @@ def train(data_set,dataset,data_dir,splits):
     with open(model_file, 'rb') as model_f:
       crf = pickle.load(model_f)
   else:  
-    crf = CRF(algorithm='lbfgs', c1=0.1, c2=10, max_iterations=100)
-    kf = KFold(n_splits=splits)
-    kf.get_n_splits(X)
-    print(kf)
-    for train_index, test_index in kf.split(X):
-      print("TRAIN:", train_index, "TEST:", test_index)
-      X_train, X_test = X[train_index], X[test_index]
-      y_train, y_test = Y[train_index], Y[test_index]
-      crf.fit(X_train, y_train)
-      #rint("Accuracy for the fold: on the test set: {accuracy_score(y_test, model.predict(X_test))}")
+    crf = CRF()
+  kf = KFold(n_splits=splits)
+  kf.get_n_splits(X)
+  print(kf)
+  for train_index, test_index in kf.split(X):
+    print("TRAIN:", train_index, "TEST:", test_index)
+    X_train, X_test = X[train_index], X[test_index]
+    y_train, y_test = Y[train_index], Y[test_index]
+    crf.fit(X_train, y_train)
+    #rint("Accuracy for the fold: on the test set: {accuracy_score(y_test, model.predict(X_test))}")
   data_end = np.shape(Y)[0]
   split_rows = int(data_end * 3/4)
   X_dev = X[split_rows:data_end]
@@ -699,7 +697,7 @@ def train(data_set,dataset,data_dir,splits):
   y_pred = crf.predict(X_dev)
   with open(model_file, 'wb') as output:  # Overwrites any existing file.
     pickle.dump(crf, output)
-  return(X_dev,Y_dev,y_pred)
+  return(X_dev,Y_dev,y_pred,crf)
 ```
 
 

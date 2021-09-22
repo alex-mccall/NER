@@ -14,7 +14,7 @@ The resulting data is filtered for some non-geoggraphical initials
 ```{r message = FALSE, warning=FALSE}
 prep_r_env()
 dataset <- 'GD45'
-model <- 'AF62'
+model <- 'GD172'
 data_dir <- "../Data/"
 key <- readRDS(paste0(data_dir,"google-key"))
 register_google(key = key)
@@ -72,15 +72,11 @@ import string
 import nltk
 import numpy as np
 from sklearn.model_selection import KFold
-
-#nltk.download('averaged_perceptron_tagger')
-#data_dir,dataset,model,train_model = prep_python_env()
-#X_train,Y_train,X_dev, Y_dev, train_model,model_file, y_pred = prep_data_single(data_dir,dataset,model,train_model)
 dataset = r.dataset
 data_set = r.ds
 data_dir = r.data_dir
 kfolds = 10
-X_dev,Y_dev,y_pred = train(data_set,dataset,data_dir,kfolds)
+X_dev,Y_dev,y_pred,crf = train(data_set,dataset,data_dir,kfolds)
 
 
 ```
@@ -123,4 +119,20 @@ results_in_context <-review_results(full_results) %>%
 
 ```
 
+```{python}
+import nltk
+import sklearn_crfsuite
+import eli5
+crf.tagger_.dump(filename="../Data/crf_tagger.txt")
+eli5.explain_weights_sklearn_crfsuite(crf, top=30)
+amc = data_set[1]
+```
+
+```{r}
+XDEV <- lapply(a$X_dev,function(x)  paste(unlist(x), collapse=' '))
+TRAINING <- lapply(a$training_words,function(x) paste(unlist(x), collapse=' '))
+PREDICTED <- lapply(a$prediction_words,function(x) paste(unlist(x), collapse=' '))
+f <- cbind(XDEV,TRAINING,PREDICTED)
+write.csv(f,'../Data/presentation.csv')
+```
 
